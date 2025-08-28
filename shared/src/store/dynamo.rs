@@ -359,7 +359,7 @@ impl super::InvitationStore for DynamoInvitationStore {
             .query()
             .table_name(&self.table_name)
             .index_name(GSI_INVITE_CODE)
-            .key_condition_expression("invite_code = :invite_code")
+            .key_condition_expression("inviteCode = :invite_code")
             .set_expression_attribute_values(Some(expr_attr_values))
             .send()
             .await
@@ -436,7 +436,7 @@ impl super::InvitationStore for DynamoInvitationStore {
             .query()
             .table_name(&self.table_name)
             .index_name(GSI_BOX_ID)
-            .key_condition_expression("box_id = :box_id")
+            .key_condition_expression("boxId = :box_id")
             .set_expression_attribute_values(Some(expr_attr_values))
             .send()
             .await

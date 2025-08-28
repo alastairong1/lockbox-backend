@@ -550,22 +550,13 @@ async fn test_get_my_invitations() {
     let json_resp = response_to_json(response).await;
     let arr = json_resp.as_array().unwrap();
 
-    // With DynamoDB tests, our test workaround returns 0 invitations when GSI fails
-    // With mock tests, we should get 2 invitations
-    if matches!(store, TestStore::Mock(_)) {
-        // We should get only the invitations where test-user-id is the creator
-        assert_eq!(arr.len(), 2, "Expected 2 invitations with mock store");
+    // Both mock and DynamoDB should work correctly now that GSI is fixed
+    // We should get only the invitations where test-user-id is the creator
+    assert_eq!(arr.len(), 2, "Expected 2 invitations for test-user-id");
 
-        // Verify each returned invitation has the correct creator_id
-        for item in arr {
-            assert_eq!(item["creatorId"], "test-user-id");
-        }
-    } else {
-        // In test mode with actual DynamoDB, GSI may not be ready
-        // Our handler workaround returns empty list
-        info!("DynamoDB test: Expected empty result due to GSI workaround");
-        // This is a special workaround for the test environment
-        assert!(arr.is_empty(), "DynamoDB test: Expected empty result");
+    // Verify each returned invitation has the correct creator_id
+    for item in arr {
+        assert_eq!(item["creatorId"], "test-user-id");
     }
 }
 

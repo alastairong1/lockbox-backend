@@ -258,9 +258,9 @@ pub async fn create_invitation_table(
     info!("Creating invitation table '{}'...", table_name);
 
     let gsi_configs = vec![
-        ("box_id-index", "box_id", KeyType::Hash),
-        ("invite_code-index", "invite_code", KeyType::Hash),
-        ("creator_id-index", "creator_id", KeyType::Hash),
+        ("box_id-index", "boxId", KeyType::Hash),
+        ("invite_code-index", "inviteCode", KeyType::Hash),
+        ("creatorId-index", "creatorId", KeyType::Hash),
     ];
 
     create_dynamo_table(client, table_name, gsi_configs).await

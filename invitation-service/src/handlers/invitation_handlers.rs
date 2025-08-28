@@ -131,7 +131,9 @@ pub async fn publish_invitation_event(invitation: &Invitation, event_type: &str)
         env::var("SNS_TOPIC_ARN").map_err(|e| map_dynamo_error("get_sns_topic_arn", e))?;
 
     // Create SNS client
-    let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+        .load()
+        .await;
     let sns_client = SnsClient::new(&config);
 
     // Call the internal implementation with the client
@@ -232,14 +234,18 @@ pub async fn get_my_invitations<S: InvitationStore + ?Sized>(
     Extension(user_id): Extension<String>,
 ) -> Result<Json<Vec<Invitation>>> {
     info!("get_my_invitations called with user_id: {}", user_id);
-    
+
     // Fetch all invitations created by this user
     let invitations = store
         .get_invitations_by_creator_id(&user_id)
         .await
         .map_err(|e| map_dynamo_error("get_invitations_by_creator_id", e))?;
 
-    info!("get_my_invitations returning {} invitations for user_id: {}", invitations.len(), user_id);
-    
+    info!(
+        "get_my_invitations returning {} invitations for user_id: {}",
+        invitations.len(),
+        user_id
+    );
+
     Ok(Json(invitations))
 }

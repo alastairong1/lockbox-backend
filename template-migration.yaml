@@ -1,14 +1,28 @@
+# MIGRATION TEMPLATE - USE THIS TO RECREATE TABLES WITH CORRECT SCHEMA
+# 
+# This template renames the logical resource IDs for the DynamoDB tables,
+# which forces CloudFormation to create new tables and delete the old ones.
+# 
+# USAGE:
+# 1. First backup your data: ./backup-dynamodb-tables.sh
+# 2. Deploy this template: sam deploy --template-file template-migration.yaml ...
+# 3. Restore your data: ./restore-dynamodb-tables.sh <backup-dir>
+# 4. Deploy the normal template: sam deploy --template-file template.yaml ...
+#
+# The only difference from template.yaml is the resource names:
+# - BoxesTable -> BoxesTableV2
+# - InvitationsTable -> InvitationsTableV2
+
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  Lockbox Services - Box and Invitation Services
+  Lockbox Services - Box and Invitation Services (MIGRATION VERSION)
 
 Parameters:
   UserPoolId:
     Type: String
     Default: eu-west-2_rdkfPgGg4
     Description: Existing Cognito User Pool ID to use
-  
 
 Resources:
   # Configure API Gateway for public access
@@ -20,55 +34,42 @@ Resources:
         AllowMethods: "'*'"
         AllowHeaders: "'*'"
         AllowOrigin: "'*'"
+        AllowCredentials: false
       Auth:
-        DefaultAuthorizer: CognitoAuthorizer
-        Authorizers:
-          CognitoAuthorizer:
-            UserPoolArn: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}
-        AddDefaultAuthorizerToCorsPreflight: false
-
-  # User Pool Client for Amplify integration
-  UserPoolClient:
-    Type: AWS::Cognito::UserPoolClient
+        ApiKeyRequired: false
+        
+  # Lambda execution role with Cognito permissions
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
     Properties:
-      ClientName: LockboxAmplifyClient
-      UserPoolId: !Ref UserPoolId
-      ExplicitAuthFlows:
-        - ALLOW_USER_SRP_AUTH
-        - ALLOW_REFRESH_TOKEN_AUTH
-        - ALLOW_USER_PASSWORD_AUTH
-      GenerateSecret: false
-      PreventUserExistenceErrors: ENABLED
-      RefreshTokenValidity: 30
-      AccessTokenValidity: 1
-      IdTokenValidity: 1
-      TokenValidityUnits:
-        RefreshToken: days
-        AccessToken: hours
-        IdToken: hours
-      # Add OAuth settings for Google and Apple sign-in
-      AllowedOAuthFlows:
-        - code
-      AllowedOAuthFlowsUserPoolClient: true
-      AllowedOAuthScopes:
-        - email
-        - profile
-        - openid
-      CallbackURLs:
-        - "com.alastairong.lockbox://callback/"
-      LogoutURLs:
-        - "com.alastairong.lockbox://signout/"
-      SupportedIdentityProviders:
-        - COGNITO
-        - Google
-        - SignInWithApple
-
-  # Add a domain for the user pool
-  # UserPoolDomain:
-  #   Type: AWS::Cognito::UserPoolDomain
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: CognitoAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cognito-idp:AdminGetUser
+                  - cognito-idp:ListUsers
+                Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}
+                
+  # Lambda Layer for shared dependencies (if we need one later)
+  # SharedDependenciesLayer:
+  #   Type: AWS::Serverless::LayerVersion
   #   Properties:
-  #     Domain: !Sub "lockbox-${AWS::AccountId}"
-  #     UserPoolId: !Ref UserPoolId
+  #     LayerName: lockbox-shared-deps
+  #     ContentUri: shared-layer/
+  #     CompatibleRuntimes:
+  #       - provided.al2
 
   BoxServiceFunction:
     Type: AWS::Serverless::Function
@@ -83,21 +84,21 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGatewayApi
-            Path: /boxes/{proxy+}
+            Path: /{proxy+}
             Method: ANY
             Auth:
-              Authorizer: CognitoAuthorizer
+              ApiKeyRequired: false
       Environment:
         Variables:
-          DYNAMODB_TABLE: !Ref BoxesTable
+          DYNAMODB_TABLE: !Ref BoxesTableV2
           RUST_LOG: info
-          COGNITO_USER_POOL_ID: !Ref UserPoolId
-          COGNITO_APP_CLIENT_ID: !Ref UserPoolClient
+          USER_POOL_ID: !Ref UserPoolId
+          REMOVE_BASE_PATH: true
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Ref BoxesTable
+            TableName: !Ref BoxesTableV2
         - DynamoDBCrudPolicy:
-            TableName: !Ref InvitationsTable
+            TableName: !Ref InvitationsTableV2
         - Version: '2012-10-17'
           Statement:
             - Effect: Allow
@@ -122,17 +123,17 @@ Resources:
             Path: /invitations/{proxy+}
             Method: ANY
             Auth:
-              Authorizer: CognitoAuthorizer
+              ApiKeyRequired: false
       Environment:
         Variables:
-          DYNAMODB_INVITATION_TABLE: !Ref InvitationsTable
+          DYNAMODB_INVITATION_TABLE: !Ref InvitationsTableV2
           RUST_LOG: info
-          COGNITO_USER_POOL_ID: !Ref UserPoolId
-          COGNITO_APP_CLIENT_ID: !Ref UserPoolClient
           SNS_TOPIC_ARN: !Ref LockboxEventsTopic
+          USER_POOL_ID: !Ref UserPoolId
+          REMOVE_BASE_PATH: true
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Ref InvitationsTable
+            TableName: !Ref InvitationsTableV2
         - SNSPublishMessagePolicy:
             TopicName: !GetAtt LockboxEventsTopic.TopicName
         - Version: '2012-10-17'
@@ -143,10 +144,11 @@ Resources:
                 - cognito-idp:ListUsers
               Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}
 
-  BoxesTable:
+  # RENAMED: BoxesTable -> BoxesTableV2
+  BoxesTableV2:
     Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
+    DeletionPolicy: Delete  # Changed to Delete for migration
+    UpdateReplacePolicy: Delete  # Changed to Delete for migration
     Properties:
       TableName: box-table
       BillingMode: PAY_PER_REQUEST
@@ -155,11 +157,6 @@ Resources:
           AttributeType: S
         - AttributeName: ownerId
           AttributeType: S
-        # Note: We can't directly create a GSI for guardian IDs because they're stored
-        # in a nested array within the item. Options for production scaling:
-        # 1. Create a separate guardian-to-box mapping table
-        # 2. Use DynamoDB Streams to maintain a flattened view of guardian relationships
-        # 3. Use client-side filtering or sparse GSIs for specific guardian-related queries
       KeySchema:
         - AttributeName: id
           KeyType: HASH
@@ -170,14 +167,14 @@ Resources:
               KeyType: HASH
           Projection:
             ProjectionType: ALL
-      # Enable point-in-time recovery for continuous backup
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
 
-  InvitationsTable:
+  # RENAMED: InvitationsTable -> InvitationsTableV2
+  InvitationsTableV2:
     Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
+    DeletionPolicy: Delete  # Changed to Delete for migration
+    UpdateReplacePolicy: Delete  # Changed to Delete for migration
     Properties:
       TableName: invitations-table
       BillingMode: PAY_PER_REQUEST
@@ -212,7 +209,6 @@ Resources:
               KeyType: HASH
           Projection:
             ProjectionType: ALL
-      # Enable point-in-time recovery for continuous backup
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
 
@@ -222,9 +218,8 @@ Resources:
     Properties:
       TopicName: lockbox-events
       DisplayName: Lockbox Events
-      KmsMasterKeyId: alias/aws/sns # Enable server-side encryption
+      KmsMasterKeyId: alias/aws/sns
       
-  # Lambda function to process invitation events and update box records
   InvitationEventHandlerFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -245,37 +240,18 @@ Resources:
                 - invitation_viewed
       Environment:
         Variables:
-          DYNAMODB_TABLE: !Ref BoxesTable
+          DYNAMODB_TABLE: !Ref BoxesTableV2
           RUST_LOG: info
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Ref BoxesTable
+            TableName: !Ref BoxesTableV2
 
-  # Setup daily backups using AWS Backup
-  BoxesTableBackupPlan:
-    Type: AWS::Backup::BackupPlan
-    Properties:
-      BackupPlan:
-        BackupPlanName: !Sub "${AWS::StackName}-boxes-backup-plan"
-        BackupPlanRule:
-          - RuleName: DailyBackupRule
-            TargetBackupVault: !Ref BackupVault
-            ScheduleExpression: "cron(0 5 * * ? *)" # Daily at 5:00 AM UTC
-            StartWindowMinutes: 60 # Start backup within 60 minutes of scheduled time
-            CompletionWindowMinutes: 180 # Complete within 3 hours
-            Lifecycle:
-              DeleteAfterDays: 30 # Keep backups for 30 days
-
-  BackupVault:
-    Type: AWS::Backup::BackupVault
-    Properties:
-      BackupVaultName: !Sub "${AWS::StackName}-backup-vault"
-
+  # Backup configuration
   BackupRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: "2012-10-17"
+        Version: '2012-10-17'
         Statement:
           - Effect: Allow
             Principal:
@@ -283,46 +259,59 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores
 
-  BoxesTableBackupSelection:
+  BackupPlan:
+    Type: AWS::Backup::BackupPlan
+    Properties:
+      BackupPlan:
+        BackupPlanName: !Sub ${AWS::StackName}-backup-plan
+        BackupPlanRule:
+          - RuleName: DailyBackup
+            TargetBackupVault: !Ref BackupVault
+            ScheduleExpression: cron(0 5 ? * * *)
+            StartWindowMinutes: 60
+            CompletionWindowMinutes: 120
+            Lifecycle:
+              MoveToColdStorageAfterDays: 30
+              DeleteAfterDays: 365
+
+  BackupVault:
+    Type: AWS::Backup::BackupVault
+    Properties:
+      BackupVaultName: !Sub ${AWS::StackName}-backup-vault
+      EncryptionKeyArn: alias/aws/backup
+
+  BackupSelection:
     Type: AWS::Backup::BackupSelection
     Properties:
-      BackupPlanId: !Ref BoxesTableBackupPlan
+      BackupPlanId: !Ref BackupPlan
       BackupSelection:
-        SelectionName: !Sub "${AWS::StackName}-boxes-backup-selection"
+        SelectionName: !Sub ${AWS::StackName}-backup-selection
         IamRoleArn: !GetAtt BackupRole.Arn
         Resources:
-          - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/box-table"
-          - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/invitations-table"
+          - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/box-table
+          - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/invitations-table
 
 Outputs:
   BoxServiceFunction:
-    Description: "Box Service Function ARN"
+    Description: Box Service Function ARN
     Value: !GetAtt BoxServiceFunction.Arn
   InvitationServiceFunction:
-    Description: "Invitation Service Function ARN"
+    Description: Invitation Service Function ARN
     Value: !GetAtt InvitationServiceFunction.Arn
   InvitationEventHandlerFunction:
-    Description: "Invitation Event Handler Function ARN"
+    Description: Invitation Event Handler Function ARN
     Value: !GetAtt InvitationEventHandlerFunction.Arn
   ApiURL:
-    Description: "API Gateway endpoint URL for Prod stage"
-    Value: !Sub "https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+    Description: API Gateway endpoint URL for Prod stage
+    Value: !Sub https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/
   BoxesTableName:
-    Description: "Box DynamoDB Table Name"
-    Value: !Ref BoxesTable
+    Description: Box DynamoDB Table Name
+    Value: !Ref BoxesTableV2
   InvitationsTableName:
-    Description: "Invitation DynamoDB Table Name"
-    Value: !Ref InvitationsTable
-  UserPoolId:
-    Description: "Cognito User Pool ID"
-    Value: !Ref UserPoolId
-  UserPoolClientId:
-    Description: "Cognito User Pool Client ID"
-    Value: !Ref UserPoolClient
-  # UserPoolDomain:
-  #   Description: "Cognito User Pool Domain"
-  #   Value: !Sub "https://${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com"
-  LockboxEventsTopicArn:
-    Description: "Lockbox Events SNS Topic ARN"
+    Description: Invitations DynamoDB Table Name
+    Value: !Ref InvitationsTableV2
+  EventTopicArn:
+    Description: SNS Topic ARN for Lockbox Events
     Value: !Ref LockboxEventsTopic

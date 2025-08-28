@@ -183,9 +183,9 @@ Resources:
       AttributeDefinitions:
         - AttributeName: id
           AttributeType: S
-        - AttributeName: invite_code
+        - AttributeName: inviteCode
           AttributeType: S
-        - AttributeName: box_id
+        - AttributeName: boxId
           AttributeType: S
         - AttributeName: creatorId
           AttributeType: S
@@ -195,13 +195,13 @@ Resources:
       GlobalSecondaryIndexes:
         - IndexName: invite_code-index
           KeySchema:
-            - AttributeName: invite_code
+            - AttributeName: inviteCode
               KeyType: HASH
           Projection:
             ProjectionType: ALL
         - IndexName: box_id-index
           KeySchema:
-            - AttributeName: box_id
+            - AttributeName: boxId
               KeyType: HASH
           Projection:
             ProjectionType: ALL

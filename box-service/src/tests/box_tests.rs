@@ -742,11 +742,22 @@ async fn test_update_box_add_guardians() {
 
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
 
-    // Since the request is expected to fail, we don't need to check the store contents
-    // Just return early
-    return;
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        debug!("Adding delay for DynamoDB consistency");
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
 
-    // The rest of the test is skipped as the request is expected to fail
+    // Get the box from the store and verify no guardian was added
+    let box_after_update = match &store {
+        TestStore::Mock(mock) => mock.get_box(&box_id).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.get_box(&box_id).await.unwrap(),
+    };
+
+    assert!(
+        box_after_update.guardians.is_empty(),
+        "No guardians should have been added"
+    );
 }
 
 #[tokio::test]

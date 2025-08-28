@@ -16,6 +16,27 @@ REGION="${AWS_REGION:-eu-west-2}"
 STACK_NAME="lockbox-box-service"
 S3_BUCKET="lockbox-deployment-bucket-${REGION}"
 
+# Check current table resource names in CloudFormation stack
+echo -e "${YELLOW}Checking current stack configuration...${NC}"
+CURRENT_RESOURCES=$(aws cloudformation describe-stack-resources \
+    --stack-name "${STACK_NAME}" \
+    --region "${REGION}" \
+    --query "StackResources[?ResourceType=='AWS::DynamoDB::Table'].LogicalResourceId" \
+    --output text 2>/dev/null || echo "")
+
+# Determine which version to use for migration
+if echo "${CURRENT_RESOURCES}" | grep -q "BoxesTableV2"; then
+    # Currently on V2, migrate back to V1 (original names)
+    MIGRATION_VERSION="V1"
+    TEMPLATE_FILE="template.yaml"  # Use original template
+    echo -e "${YELLOW}Current tables are V2, will migrate to V1 (original)${NC}"
+else
+    # Currently on V1 (or first run), migrate to V2
+    MIGRATION_VERSION="V2"
+    TEMPLATE_FILE="template-migration.yaml"  # Use migration template
+    echo -e "${YELLOW}Current tables are V1/original, will migrate to V2${NC}"
+fi
+
 echo -e "${GREEN}==================================================${NC}"
 echo -e "${GREEN}     DynamoDB Table Migration Script${NC}"
 echo -e "${GREEN}==================================================${NC}"
@@ -131,8 +152,10 @@ main() {
     echo -e "${YELLOW}   Make sure you have backed up your data (Step 1 completed).${NC}"
     confirm_step "Deploy migration template to recreate tables?"
     
+    echo -e "Using template: ${YELLOW}${TEMPLATE_FILE}${NC}"
+    
     sam deploy \
-        --template-file template-migration.yaml \
+        --template-file "${TEMPLATE_FILE}" \
         --stack-name "${STACK_NAME}" \
         --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND \
         --no-confirm-changeset \
@@ -159,24 +182,12 @@ main() {
     echo -e "${GREEN}✓ Data restored${NC}"
     echo ""
     
-    # Step 5: Deploy normal template
-    echo -e "${GREEN}Step 5: Deploying normal template (final step)${NC}"
-    confirm_step "This will finalize the migration by restoring the original resource names. Continue?"
+    # Step 5: Optional - No need for second deployment anymore
+    echo -e "${GREEN}Step 5: Migration Complete${NC}"
+    echo -e "${YELLOW}Note: The tables have been recreated with correct schema.${NC}"
+    echo -e "${YELLOW}The CloudFormation resource names are now: ${MIGRATION_VERSION}${NC}"
     
-    sam deploy \
-        --template-file template.yaml \
-        --stack-name "${STACK_NAME}" \
-        --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND \
-        --no-confirm-changeset \
-        --s3-bucket "${S3_BUCKET}" \
-        --region "${REGION}" \
-        --no-fail-on-empty-changeset \
-        --parameter-overrides "Stage=prod"
-    
-    echo -e "${GREEN}✓ Normal template deployed${NC}"
-    echo ""
-    
-    # Step 6: Verify
+    # Step 5: Verify (was Step 6)
     echo -e "${GREEN}Step 6: Verifying migration${NC}"
     
     # Check item counts

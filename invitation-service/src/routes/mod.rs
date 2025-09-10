@@ -10,6 +10,7 @@ use tower_http::cors::{Any, CorsLayer};
 
 use crate::handlers::invitation_handlers::{
     create_invitation, get_my_invitations, handle_invitation, refresh_invitation,
+    view_invitation_by_code,
 };
 // Import shared auth middleware
 use lockbox_shared::auth::auth_middleware;
@@ -65,13 +66,21 @@ where
         response
     }
 
-    // Create the API routes
-    let api_routes = Router::new()
+    // Create the API routes - note: view route doesn't require auth
+    let auth_routes = Router::new()
         .route("/invitations/new", post(create_invitation))
         .route("/invitations/handle", put(handle_invitation))
         .route("/invitations/:inviteId/refresh", patch(refresh_invitation))
         .route("/invitations/me", get(get_my_invitations))
-        .layer(middleware::from_fn(auth_middleware))
+        .layer(middleware::from_fn(auth_middleware));
+    
+    // Public route for viewing invitations (no auth required)
+    let public_routes = Router::new()
+        .route("/invitations/view/:code", get(view_invitation_by_code));
+    
+    let api_routes = Router::new()
+        .merge(auth_routes)
+        .merge(public_routes)
         .with_state(store);
 
     // Create the main router with the prefix

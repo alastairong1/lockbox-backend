@@ -249,3 +249,32 @@ pub async fn get_my_invitations<S: InvitationStore + ?Sized>(
 
     Ok(Json(invitations))
 }
+
+// GET /invitations/view/:code - View invitation details by code without consuming it
+pub async fn view_invitation_by_code<S: InvitationStore + ?Sized>(
+    State(store): State<Arc<S>>,
+    Path(code): Path<String>,
+) -> Result<Json<Invitation>> {
+    info!("view_invitation_by_code called with code: {}", code);
+
+    // Fetch the invitation by code
+    let invitation = store.get_invitation_by_code(&code).await?;
+
+    // Check if invitation is expired
+    let expires_at = chrono::DateTime::parse_from_rfc3339(&invitation.expires_at)
+        .map_err(|e| AppError::InternalServerError(format!("Failed to parse expiration date: {}", e)))?;
+    
+    if Utc::now() > expires_at {
+        return Err(AppError::NotFound(format!(
+            "Invitation with code {} has expired",
+            code
+        )));
+    }
+
+    info!(
+        "view_invitation_by_code returning invitation for box_id: {}",
+        invitation.box_id
+    );
+
+    Ok(Json(invitation))
+}

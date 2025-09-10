@@ -66,7 +66,8 @@ where
         response
     }
 
-    // Create the API routes - note: view route doesn't require auth
+    // Create the API routes
+    // Routes that require authentication
     let auth_routes = Router::new()
         .route("/invitations/new", post(create_invitation))
         .route("/invitations/handle", put(handle_invitation))
@@ -74,13 +75,14 @@ where
         .route("/invitations/me", get(get_my_invitations))
         .layer(middleware::from_fn(auth_middleware));
     
-    // Public route for viewing invitations (no auth required)
+    // Public routes (no auth required)
     let public_routes = Router::new()
         .route("/invitations/view/:code", get(view_invitation_by_code));
     
+    // Merge routes with state
     let api_routes = Router::new()
-        .merge(auth_routes)
-        .merge(public_routes)
+        .merge(public_routes)  // Add public routes first
+        .merge(auth_routes)    // Then auth routes
         .with_state(store);
 
     // Create the main router with the prefix

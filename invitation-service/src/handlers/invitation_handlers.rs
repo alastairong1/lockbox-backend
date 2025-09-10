@@ -254,7 +254,7 @@ pub async fn get_my_invitations<S: InvitationStore + ?Sized>(
 pub async fn view_invitation_by_code<S: InvitationStore + ?Sized>(
     State(store): State<Arc<S>>,
     Path(code): Path<String>,
-) -> Result<Json<Invitation>> {
+) -> Result<Json<serde_json::Value>> {
     info!("view_invitation_by_code called with code: {}", code);
 
     // Fetch the invitation by code
@@ -271,10 +271,33 @@ pub async fn view_invitation_by_code<S: InvitationStore + ?Sized>(
         )));
     }
 
+    // We need to get box information from the box service
+    // For now, return invitation with a note that box data should be fetched separately
+    // In a full implementation, we'd either:
+    // 1. Make a cross-service call to box-service
+    // 2. Store denormalized box data in the invitation
+    // 3. Have the client make a separate call to get box details
+    
+    // Create an enhanced response with invitation data
+    let response = json!({
+        "id": invitation.id,
+        "inviteCode": invitation.invite_code,
+        "invitedName": invitation.invited_name,
+        "boxId": invitation.box_id,
+        "createdAt": invitation.created_at,
+        "expiresAt": invitation.expires_at,
+        "opened": invitation.opened,
+        "linkedUserId": invitation.linked_user_id,
+        "creatorId": invitation.creator_id,
+        // Note: Box owner name would need to be fetched from box service
+        // For now, frontend can use creatorId or fetch box details separately
+        "note": "Box details should be fetched using boxId"
+    });
+
     info!(
         "view_invitation_by_code returning invitation for box_id: {}",
         invitation.box_id
     );
 
-    Ok(Json(invitation))
+    Ok(Json(response))
 }

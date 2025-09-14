@@ -62,12 +62,28 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: eu-west-2
+          aws-region: ${{ secrets.AWS_REGION || 'eu-west-2' }}
           
       - name: Install AWS SAM CLI
         run: |
           pip install aws-sam-cli
-          
+          sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Capture current stack outputs (if any)
+        id: before
+        run: |
+          AWS_REGION="${{ secrets.AWS_REGION }}"; AWS_REGION="${AWS_REGION:-eu-west-2}"; export AWS_REGION
+          if aws cloudformation describe-stacks --stack-name lockbox-box-service --region "$AWS_REGION" >/dev/null 2>&1; then
+            API_BEFORE=$(aws cloudformation describe-stacks --stack-name lockbox-box-service --region "$AWS_REGION" --query "Stacks[0].Outputs[?OutputKey=='ApiURL'].OutputValue" --output text || true)
+            USERPOOL_BEFORE=$(aws cloudformation describe-stacks --stack-name lockbox-box-service --region "$AWS_REGION" --query "Stacks[0].Outputs[?OutputKey=='UserPoolId'].OutputValue" --output text || true)
+            CLIENT_BEFORE=$(aws cloudformation describe-stacks --stack-name lockbox-box-service --region "$AWS_REGION" --query "Stacks[0].Outputs[?OutputKey=='UserPoolClientId'].OutputValue" --output text || true)
+          else
+            API_BEFORE=""; USERPOOL_BEFORE=""; CLIENT_BEFORE="";
+          fi
+          echo "api_before=$API_BEFORE" >> $GITHUB_OUTPUT
+          echo "userpool_before=$USERPOOL_BEFORE" >> $GITHUB_OUTPUT
+          echo "client_before=$CLIENT_BEFORE" >> $GITHUB_OUTPUT
+
       - name: Deploy with SAM
         run: |
           # Set AWS region from secrets or default to us-east-1
@@ -87,13 +103,32 @@ jobs:
             --s3-bucket "$BUCKET_NAME" \
             --region "$AWS_REGION" \
             --no-fail-on-empty-changeset \
-            --parameter-overrides "Stage=prod"
+            --parameter-overrides \
+              "UserPoolId=${{ secrets.COGNITO_USER_POOL_ID }}"
             
-      - name: Display Cognito Outputs
+      - name: Capture new stack outputs and enforce stability
+        id: after
         run: |
-          # Get and display the Cognito User Pool ID and Client ID
-          AWS_REGION="${{ secrets.AWS_REGION }}"
-          AWS_REGION="${AWS_REGION:-eu-west-2}"
-          
+          AWS_REGION="${{ secrets.AWS_REGION }}"; AWS_REGION="${AWS_REGION:-eu-west-2}"; export AWS_REGION
           echo "Getting stack outputs..."
-          aws cloudformation describe-stacks --stack-name lockbox-box-service --region "$AWS_REGION" --query "Stacks[0].Outputs" --output table
+          aws cloudformation describe-stacks --stack-name lockbox-box-service --region "$AWS_REGION" --query "Stacks[0].Outputs" --output table || true
+          API_AFTER=$(aws cloudformation describe-stacks --stack-name lockbox-box-service --region "$AWS_REGION" --query "Stacks[0].Outputs[?OutputKey=='ApiURL'].OutputValue" --output text || true)
+          USERPOOL_AFTER=$(aws cloudformation describe-stacks --stack-name lockbox-box-service --region "$AWS_REGION" --query "Stacks[0].Outputs[?OutputKey=='UserPoolId'].OutputValue" --output text || true)
+          CLIENT_AFTER=$(aws cloudformation describe-stacks --stack-name lockbox-box-service --region "$AWS_REGION" --query "Stacks[0].Outputs[?OutputKey=='UserPoolClientId'].OutputValue" --output text || true)
+          echo "API URL before:  '${{ steps.before.outputs.api_before }}'"
+          echo "API URL after:   '$API_AFTER'"
+          echo "UserPool before: '${{ steps.before.outputs.userpool_before }}'"
+          echo "UserPool after:  '$USERPOOL_AFTER'"
+          echo "Client before:   '${{ steps.before.outputs.client_before }}'"
+          echo "Client after:    '$CLIENT_AFTER'"
+          # Enforce that API URL and Cognito User Pool remain unchanged if they existed prior to deploy
+          if [ -n "${{ steps.before.outputs.api_before }}" ] && [ "${{ steps.before.outputs.api_before }}" != "$API_AFTER" ]; then
+            echo "::error::API URL changed from '${{ steps.before.outputs.api_before }}' to '$API_AFTER'. Aborting to prevent breaking clients." && exit 1
+          fi
+          if [ -n "${{ steps.before.outputs.userpool_before }}" ] && [ "${{ steps.before.outputs.userpool_before }}" != "$USERPOOL_AFTER" ]; then
+            echo "::error::Cognito User Pool changed from '${{ steps.before.outputs.userpool_before }}' to '$USERPOOL_AFTER'. Aborting." && exit 1
+          fi
+          # Optional: enforce client ID stability too
+          if [ -n "${{ steps.before.outputs.client_before }}" ] && [ "${{ steps.before.outputs.client_before }}" != "$CLIENT_AFTER" ]; then
+            echo "::warning::Cognito App Client changed. Ensure frontend config is aligned."
+          fi

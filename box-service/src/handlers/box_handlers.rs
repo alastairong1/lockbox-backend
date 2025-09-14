@@ -76,7 +76,7 @@ where
         created_at: now.clone(),
         updated_at: now.clone(),
         owner_id: user_id,
-        owner_name: None,
+        owner_name: payload.owner_name,
         documents: vec![],
         guardians: vec![],
         unlock_instructions: None,

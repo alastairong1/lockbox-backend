@@ -222,11 +222,12 @@ where
     // Get the box from store
     let mut box_record = store.get_box(&box_id).await?;
 
-    // Find if user is a guardian with pending status
+    // Find if user is a guardian with a pending invitation
+    // Pending can be either Invited (not opened) or Viewed (opened/linked)
     let guardian_index = box_record
         .guardians
         .iter()
-        .position(|g| g.id == user_id && g.status == GuardianStatus::Invited);
+        .position(|g| g.id == user_id && (g.status == GuardianStatus::Invited || g.status == GuardianStatus::Viewed));
 
     if let Some(index) = guardian_index {
         // Update the guardian status based on the acceptance

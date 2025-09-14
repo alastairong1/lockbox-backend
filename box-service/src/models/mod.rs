@@ -9,6 +9,8 @@ use lockbox_shared::models::{Document, Guardian, UnlockRequest};
 pub struct CreateBoxRequest {
     pub name: String,
     pub description: String,
+    #[serde(rename = "ownerName", skip_serializing_if = "Option::is_none")]
+    pub owner_name: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]

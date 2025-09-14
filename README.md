@@ -71,7 +71,8 @@ Create a new box with you as the owner.
 ```json
 {
   "name": "New Box",
-  "description": "Description of the box"
+  "description": "Description of the box",
+  "ownerName": "Owner Name (optional)"
 }
 ```
 

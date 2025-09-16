@@ -1,8 +1,7 @@
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-// Import shared models for direct use in response types
-use lockbox_shared::models::{Document, Guardian, UnlockRequest};
+// Import shared models for direct use in request/response types
+use lockbox_shared::models::{Document, Guardian, UnlockRequest, ErrorResponse, MessageResponse, now_str};
 
 // Request DTOs
 #[derive(Deserialize, Debug)]
@@ -165,17 +164,7 @@ pub struct GuardianInvitationResponse {
     pub accept: bool,
 }
 
-#[derive(Serialize)]
-pub struct ErrorResponse {
-    pub error: String,
-}
-
-#[derive(Serialize)]
-pub struct MessageResponse {
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub box_id: Option<String>,
-}
+// Use shared ErrorResponse and MessageResponse from lockbox_shared
 
 // GuardianBox DTO to exclude version
 #[derive(Serialize, Debug)]
@@ -229,7 +218,4 @@ impl From<lockbox_shared::models::GuardianBox> for GuardianBoxResponse {
     }
 }
 
-// Utility functions
-pub fn now_str() -> String {
-    Utc::now().to_rfc3339()
-}
+// Use shared now_str()

@@ -86,25 +86,56 @@ jobs:
 
       - name: Deploy with SAM
         run: |
-          # Set AWS region from secrets or default to us-east-1
+          set -euo pipefail
+
+          # Set AWS region from secrets or default to eu-west-2
           AWS_REGION="${{ secrets.AWS_REGION }}"
           AWS_REGION="${AWS_REGION:-eu-west-2}"
           echo "Using AWS region: $AWS_REGION"
           
           # Create S3 bucket for deployment if it doesn't exist
           BUCKET_NAME="lockbox-deployment-bucket-$AWS_REGION"
-          aws s3 mb "s3://$BUCKET_NAME" --region "$AWS_REGION" || true
-          
+          if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+            echo "Deployment bucket '$BUCKET_NAME' already exists."
+          else
+            aws s3 mb "s3://$BUCKET_NAME" --region "$AWS_REGION"
+          fi
+
+          # Resolve Cognito User Pool parameter
+          USER_POOL_ID="${{ secrets.COGNITO_USER_POOL_ID }}"
+          if [ -z "$USER_POOL_ID" ]; then
+            USER_POOL_ID="${{ steps.before.outputs.userpool_before }}"
+            if [ -n "$USER_POOL_ID" ]; then
+              echo "Using existing stack UserPoolId from previous deployment."
+            fi
+          fi
+
+          PARAM_ARGS=""
+          if [ -n "$USER_POOL_ID" ]; then
+            PARAM_ARGS="--parameter-overrides ParameterKey=UserPoolId,ParameterValue=$USER_POOL_ID"
+          else
+            echo "::warning::No Cognito User Pool ID supplied via secrets and no previous stack output found. Falling back to template default."
+          fi
+
           # Deploy using SAM with increased timeout for Cognito resources
-          sam deploy --template-file template.yaml \
-            --stack-name lockbox-box-service \
-            --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND \
-            --no-confirm-changeset \
-            --s3-bucket "$BUCKET_NAME" \
-            --region "$AWS_REGION" \
-            --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              "UserPoolId=${{ secrets.COGNITO_USER_POOL_ID }}"
+          if [ -n "$PARAM_ARGS" ]; then
+            sam deploy --template-file template.yaml \
+              --stack-name lockbox-box-service \
+              --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND \
+              --no-confirm-changeset \
+              --s3-bucket "$BUCKET_NAME" \
+              --region "$AWS_REGION" \
+              --no-fail-on-empty-changeset \
+              $PARAM_ARGS
+          else
+            sam deploy --template-file template.yaml \
+              --stack-name lockbox-box-service \
+              --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND \
+              --no-confirm-changeset \
+              --s3-bucket "$BUCKET_NAME" \
+              --region "$AWS_REGION" \
+              --no-fail-on-empty-changeset
+          fi
             
       - name: Capture new stack outputs and enforce stability
         id: after

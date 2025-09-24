@@ -142,6 +142,30 @@ fn create_test_boxes(now: &str) -> Vec<BoxRecord> {
     boxes
 }
 
+async fn upsert_guardians(
+    store: &TestStore,
+    box_id: &str,
+    guardians: Vec<Guardian>,
+) {
+    let mut box_record = match store {
+        TestStore::Mock(mock) => mock.get_box(box_id).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.get_box(box_id).await.unwrap(),
+    };
+
+    box_record.guardians = guardians;
+    box_record.updated_at = now_str();
+
+    match store {
+        TestStore::Mock(mock) => {
+            mock.update_box(box_record).await.unwrap();
+        }
+        TestStore::DynamoDB(dynamo) => {
+            let _ = dynamo.update_box(box_record).await.unwrap();
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        }
+    }
+}
+
 #[tokio::test]
 async fn test_get_boxes() {
     let (app, store) = create_test_app().await;
@@ -1070,6 +1094,84 @@ async fn test_update_guardian_invalid_payload() {
 
     // Verify unprocessable entity status
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn test_delete_guardian_success() {
+    let (app, store) = create_test_app().await;
+    add_test_data_to_store(&store).await;
+
+    let guardian_id = "guardian_delete";
+    let guardian = Guardian {
+        id: guardian_id.into(),
+        name: "Guardian Delete".into(),
+        lead_guardian: false,
+        status: GuardianStatus::Accepted,
+        added_at: now_str(),
+        invitation_id: "inv-delete".into(),
+    };
+
+    upsert_guardians(&store, "box_1", vec![guardian.clone()]).await;
+
+    let response = app
+        .clone()
+        .oneshot(create_test_request(
+            "DELETE",
+            &format!("/boxes/owned/box_1/guardian/{}", guardian_id),
+            "user_1",
+            None,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_to_json(response).await;
+    assert_eq!(body["message"], "Guardian deleted successfully");
+    assert_eq!(body["guardian"]["id"], guardian_id);
+
+    let box_after = match &store {
+        TestStore::Mock(mock) => mock.get_box("box_1").await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.get_box("box_1").await.unwrap(),
+    };
+    assert!(
+        box_after
+            .guardians
+            .iter()
+            .all(|g| g.id != guardian_id),
+        "Guardian should be removed from the box"
+    );
+}
+
+#[tokio::test]
+async fn test_delete_guardian_unauthorized() {
+    let (app, store) = create_test_app().await;
+    add_test_data_to_store(&store).await;
+
+    let guardian = Guardian {
+        id: "guardian_delete".into(),
+        name: "Guardian Delete".into(),
+        lead_guardian: false,
+        status: GuardianStatus::Accepted,
+        added_at: now_str(),
+        invitation_id: "inv-delete".into(),
+    };
+
+    upsert_guardians(&store, "box_1", vec![guardian]).await;
+
+    let response = app
+        .clone()
+        .oneshot(create_test_request(
+            "DELETE",
+            "/boxes/owned/box_1/guardian/guardian_delete",
+            "user_2",
+            None,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let body = response_to_json(response).await;
+    assert_eq!(body["error"], "You don't have permission to delete guardians from this box");
 }
 
 #[tokio::test]

@@ -1,5 +1,4 @@
-use serde::{Deserialize, Serialize};
-use lockbox_shared::models::MessageResponse;
+use serde::Deserialize;
 
 // Request DTOs
 #[derive(Deserialize, Debug)]
@@ -12,8 +11,6 @@ pub struct CreateInvitationRequest {
 
 #[derive(Deserialize, Debug)]
 pub struct ConnectToUserRequest {
-    #[serde(rename = "userId")]
-    pub user_id: String,
     #[serde(rename = "inviteCode")]
     pub invite_code: String,
 }

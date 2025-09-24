@@ -14,9 +14,9 @@ use serde_json::json;
 use std::sync::Arc;
 use tower::ServiceExt;
 
-use crate::{models::now_str, routes};
+use crate::routes;
 use lockbox_shared::models::{
-    BoxRecord, Guardian, GuardianStatus, UnlockRequest, UnlockRequestStatus,
+    now_str, BoxRecord, Guardian, GuardianStatus, UnlockRequest, UnlockRequestStatus,
 };
 
 // Constants for DynamoDB tests
@@ -213,6 +213,31 @@ async fn add_test_data_to_store(store: &TestStore) {
     if matches!(store, TestStore::DynamoDB(_)) {
         debug!("Adding delay for DynamoDB consistency");
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
+}
+
+async fn replace_guardian(
+    store: &TestStore,
+    box_id: &str,
+    guardian: Guardian,
+) {
+    let mut record = match store {
+        TestStore::Mock(mock) => mock.get_box(box_id).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.get_box(box_id).await.unwrap(),
+    };
+
+    record.guardians.retain(|g| g.id != guardian.id);
+    record.guardians.push(guardian);
+    record.updated_at = now_str();
+
+    match store {
+        TestStore::Mock(mock) => {
+            mock.update_box(record).await.unwrap();
+        }
+        TestStore::DynamoDB(dynamo) => {
+            let _ = dynamo.update_box(record).await.unwrap();
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        }
     }
 }
 
@@ -759,6 +784,138 @@ async fn test_respond_to_unlock_request_invalid_payload() {
         final_request.rejected_by.is_empty(),
         "Rejected by should still be empty"
     );
+}
+
+#[tokio::test]
+async fn test_accept_guardian_invitation() {
+    let (app, store) = create_test_app().await;
+    add_test_data_to_store(&store).await;
+
+    let pending_guardian = Guardian {
+        id: "pending_guardian".into(),
+        name: "Pending Guardian".into(),
+        lead_guardian: false,
+        status: GuardianStatus::Invited,
+        added_at: now_str(),
+        invitation_id: "inv-pending".into(),
+    };
+
+    replace_guardian(&store, "11111111-1111-1111-1111-111111111111", pending_guardian.clone()).await;
+
+    let response = app
+        .clone()
+        .oneshot(create_test_request(
+            "PATCH",
+            "/boxes/guardian/11111111-1111-1111-1111-111111111111/invitation",
+            &pending_guardian.id,
+            Some(json!({ "accept": true })),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_to_json(response).await;
+    assert_eq!(body["message"], "Guardian invitation accepted successfully");
+
+    let updated_box = match &store {
+        TestStore::Mock(mock) => mock
+            .get_box("11111111-1111-1111-1111-111111111111")
+            .await
+            .unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo
+            .get_box("11111111-1111-1111-1111-111111111111")
+            .await
+            .unwrap(),
+    };
+
+    let guardian = updated_box
+        .guardians
+        .into_iter()
+        .find(|g| g.id == "pending_guardian")
+        .expect("Guardian should exist after acceptance");
+    assert_eq!(guardian.status, GuardianStatus::Accepted);
+}
+
+#[tokio::test]
+async fn test_reject_guardian_invitation() {
+    let (app, store) = create_test_app().await;
+    add_test_data_to_store(&store).await;
+
+    let pending_guardian = Guardian {
+        id: "pending_guardian".into(),
+        name: "Pending Guardian".into(),
+        lead_guardian: false,
+        status: GuardianStatus::Invited,
+        added_at: now_str(),
+        invitation_id: "inv-pending".into(),
+    };
+
+    replace_guardian(&store, "11111111-1111-1111-1111-111111111111", pending_guardian.clone()).await;
+
+    let response = app
+        .clone()
+        .oneshot(create_test_request(
+            "PATCH",
+            "/boxes/guardian/11111111-1111-1111-1111-111111111111/invitation",
+            &pending_guardian.id,
+            Some(json!({ "accept": false })),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_to_json(response).await;
+    assert_eq!(body["message"], "Guardian invitation rejected successfully");
+
+    let updated_box = match &store {
+        TestStore::Mock(mock) => mock
+            .get_box("11111111-1111-1111-1111-111111111111")
+            .await
+            .unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo
+            .get_box("11111111-1111-1111-1111-111111111111")
+            .await
+            .unwrap(),
+    };
+
+    let guardian = updated_box
+        .guardians
+        .into_iter()
+        .find(|g| g.id == "pending_guardian")
+        .expect("Guardian should exist after rejection");
+    assert_eq!(guardian.status, GuardianStatus::Rejected);
+}
+
+#[tokio::test]
+async fn test_guardian_invitation_without_pending_status() {
+    let (app, store) = create_test_app().await;
+    add_test_data_to_store(&store).await;
+
+    let accepted_guardian = Guardian {
+        id: "accepted_guardian".into(),
+        name: "Accepted Guardian".into(),
+        lead_guardian: false,
+        status: GuardianStatus::Accepted,
+        added_at: now_str(),
+        invitation_id: "inv-accepted".into(),
+    };
+
+    replace_guardian(&store, "11111111-1111-1111-1111-111111111111", accepted_guardian.clone()).await;
+
+    let response = app
+        .clone()
+        .oneshot(create_test_request(
+            "PATCH",
+            "/boxes/guardian/11111111-1111-1111-1111-111111111111/invitation",
+            &accepted_guardian.id,
+            Some(json!({ "accept": true })),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response_to_json(response).await;
+    assert_eq!(body["error"], "No pending invitation found for this user");
 }
 
 #[tokio::test]

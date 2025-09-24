@@ -235,6 +235,7 @@ pub struct ErrorResponse {
 }
 
 #[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct MessageResponse {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -264,14 +265,14 @@ mod tests {
             linked_user_id: None,
             creator_id: "creator-123".to_string(),
         };
-        
+
         let json = serde_json::to_value(&invitation).unwrap();
-        
+
         // Verify that invite_code is serialized as inviteCode in camelCase
         assert!(json.get("inviteCode").is_some());
         assert!(json.get("invite_code").is_none());
         assert_eq!(json["inviteCode"].as_str().unwrap(), "TESTCODE");
-        
+
         // Verify other camelCase fields are working too
         assert!(json.get("invitedName").is_some());
         assert!(json.get("boxId").is_some());

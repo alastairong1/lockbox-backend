@@ -220,7 +220,6 @@ async fn test_handle_invitation() {
     };
 
     let handle_payload = json!({
-        "userId": "user-456",
         "inviteCode": invite_code
     });
     let response = app
@@ -296,7 +295,6 @@ async fn test_handle_invitation_expired_code() {
     };
 
     let bad_payload = json!({
-        "userId": "user-456",
         "inviteCode": "EXPIRED"
     });
     let response = app
@@ -460,7 +458,6 @@ async fn test_handle_invitation_invalid_code() {
     };
 
     let bad_payload = json!({
-        "userId": "user-456",
         "inviteCode": "INVALID"
     });
     let response = app

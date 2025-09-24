@@ -6,15 +6,20 @@ use axum::{
 use chrono::{Duration, Utc};
 use log::{debug, error, info};
 use serde_json::json;
+use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
+use tokio::sync::OnceCell;
 use uuid::Uuid;
 
-use lockbox_shared::{models::Invitation, store::InvitationStore};
+use lockbox_shared::{
+    models::{Invitation, MessageResponse},
+    store::InvitationStore,
+};
 
 use crate::{
     error::{map_dynamo_error, AppError, Result},
-    models::{ConnectToUserRequest, CreateInvitationRequest, MessageResponse},
+    models::{ConnectToUserRequest, CreateInvitationRequest},
 };
 
 // Alphabet for user-friendly invitation codes (uppercase letters only)
@@ -68,10 +73,9 @@ pub async fn create_invitation<S: InvitationStore + ?Sized>(
 pub async fn handle_invitation<S: InvitationStore + ?Sized>(
     State(store): State<Arc<S>>,
     Extension(auth_user_id): Extension<String>,
-    Json(mut request): Json<ConnectToUserRequest>,
+    Json(request): Json<ConnectToUserRequest>,
 ) -> Result<Json<MessageResponse>> {
-    // Overwrite payload userId with authenticated user
-    request.user_id = auth_user_id.clone();
+    // Ignore userId in payload (no longer present). Use authenticated user id exclusively
     // Fetch the invitation by code, propagate NotFound and Expired appropriately
     let mut invitation = store.get_invitation_by_code(&request.invite_code).await?;
 
@@ -108,6 +112,9 @@ pub async fn handle_invitation<S: InvitationStore + ?Sized>(
 }
 
 // Helper function to publish an invitation event to SNS
+static SNS_CLIENT: OnceCell<SnsClient> = OnceCell::const_new();
+static TOPIC_ARN: OnceCell<String> = OnceCell::const_new();
+
 pub async fn publish_invitation_event(invitation: &Invitation, event_type: &str) -> Result<()> {
     debug!(
         "publish_invitation_event called for event_type={}, invitation_id={}",
@@ -126,18 +133,27 @@ pub async fn publish_invitation_event(invitation: &Invitation, event_type: &str)
         }
     }
 
-    // Get SNS topic ARN from environment variable
-    let topic_arn =
-        env::var("SNS_TOPIC_ARN").map_err(|e| map_dynamo_error("get_sns_topic_arn", e))?;
-
-    // Create SNS client
-    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-        .load()
+    // Get or initialize SNS client (async)
+    let client_ref = SNS_CLIENT
+        .get_or_init(|| async {
+            let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+                .load()
+                .await;
+            SnsClient::new(&config)
+        })
         .await;
-    let sns_client = SnsClient::new(&config);
+    let client = client_ref.clone();
 
-    // Call the internal implementation with the client
-    publish_invitation_event_with_client(invitation, sns_client, &topic_arn, event_type).await
+    // Get or initialize topic ARN
+    let topic_arn_ref = TOPIC_ARN
+        .get_or_try_init(|| async {
+            env::var("SNS_TOPIC_ARN").map_err(|e| map_dynamo_error("get_sns_topic_arn", e))
+        })
+        .await?;
+    let topic_arn: &str = topic_arn_ref.as_str();
+
+    // Call the internal implementation with the cached client and topic
+    publish_invitation_event_with_client(invitation, client, topic_arn, event_type).await
 }
 
 // Internal implementation that can be mocked for testing
@@ -148,29 +164,13 @@ pub async fn publish_invitation_event_with_client(
     event_type: &str,
 ) -> Result<()> {
     // Create the event payload
-    let event_payload = json!({
-        "event_type": event_type,
-        "invitation_id": invitation.id,
-        "box_id": invitation.box_id,
-        "user_id": invitation.linked_user_id,
-        "invite_code": invitation.invite_code,
-        "timestamp": Utc::now().to_rfc3339()
-    });
+    let event_payload = build_event_payload(invitation, event_type)?;
 
     // Convert to string
     let message = serde_json::to_string(&event_payload)
         .map_err(|e| map_dynamo_error("serialize_event_payload", e))?;
 
-    // Create message attribute
-    let message_attribute = aws_sdk_sns::types::MessageAttributeValue::builder()
-        .data_type("String")
-        .string_value(event_type)
-        .build()
-        .map_err(|e| map_dynamo_error("build_message_attribute", e))?;
-
-    // Add to HashMap for message attributes
-    let mut message_attributes = std::collections::HashMap::new();
-    message_attributes.insert("eventType".to_string(), message_attribute);
+    let message_attributes = build_event_message_attributes(event_type)?;
 
     let mut publish_request = sns_client
         .publish()
@@ -188,6 +188,31 @@ pub async fn publish_invitation_event_with_client(
         .map_err(|e| map_dynamo_error("publish_to_sns", e))?;
 
     Ok(())
+}
+
+fn build_event_message_attributes(
+    event_type: &str,
+) -> Result<HashMap<String, aws_sdk_sns::types::MessageAttributeValue>> {
+    let attribute = aws_sdk_sns::types::MessageAttributeValue::builder()
+        .data_type("String")
+        .string_value(event_type)
+        .build()
+        .map_err(|e| map_dynamo_error("build_message_attribute", e))?;
+
+    let mut attributes = HashMap::new();
+    attributes.insert("eventType".to_string(), attribute);
+    Ok(attributes)
+}
+
+fn build_event_payload(invitation: &Invitation, event_type: &str) -> Result<serde_json::Value> {
+    Ok(json!({
+        "event_type": event_type,
+        "invitation_id": invitation.id,
+        "box_id": invitation.box_id,
+        "user_id": invitation.linked_user_id,
+        "invite_code": invitation.invite_code,
+        "timestamp": Utc::now().to_rfc3339()
+    }))
 }
 
 // PATCH /invitations/:inviteId/refresh - Refresh the invitation
@@ -261,9 +286,10 @@ pub async fn view_invitation_by_code<S: InvitationStore + ?Sized>(
     let invitation = store.get_invitation_by_code(&code).await?;
 
     // Check if invitation is expired
-    let expires_at = chrono::DateTime::parse_from_rfc3339(&invitation.expires_at)
-        .map_err(|e| AppError::InternalServerError(format!("Failed to parse expiration date: {}", e)))?;
-    
+    let expires_at = chrono::DateTime::parse_from_rfc3339(&invitation.expires_at).map_err(|e| {
+        AppError::InternalServerError(format!("Failed to parse expiration date: {}", e))
+    })?;
+
     if Utc::now() > expires_at {
         return Err(AppError::NotFound(format!(
             "Invitation with code {} has expired",
@@ -277,7 +303,7 @@ pub async fn view_invitation_by_code<S: InvitationStore + ?Sized>(
     // 1. Make a cross-service call to box-service
     // 2. Store denormalized box data in the invitation
     // 3. Have the client make a separate call to get box details
-    
+
     // Create an enhanced response with invitation data
     let response = json!({
         "id": invitation.id,

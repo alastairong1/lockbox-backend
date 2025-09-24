@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 // Import shared models for direct use in request/response types
-use lockbox_shared::models::{Document, Guardian, UnlockRequest, ErrorResponse, MessageResponse, now_str};
+use lockbox_shared::models::{Document, Guardian, UnlockRequest};
 
 // Request DTOs
 #[derive(Deserialize, Debug)]

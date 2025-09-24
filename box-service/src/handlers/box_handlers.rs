@@ -135,8 +135,6 @@ where
         box_rec.is_locked = is_locked;
     }
 
-    box_rec.updated_at = now_str();
-
     // Save the updated box
     let updated_box = store.update_box(box_rec).await?;
 
@@ -173,13 +171,13 @@ where
 }
 
 // Helper function to update a guardian in a box
-// Returns (updated_box, was_guardian_updated)
+// Returns updated box
 async fn update_or_add_guardian<S>(
     store: &S,
     box_id: &str,
     owner_id: &str,
     guardian: &Guardian,
-) -> Result<(BoxRecord, bool)>
+) -> Result<BoxRecord>
 where
     S: BoxStore,
 {
@@ -196,22 +194,18 @@ where
     // Check if the guardian already exists in the box
     let guardian_index = box_rec.guardians.iter().position(|g| g.id == guardian.id);
 
-    let was_updated = if let Some(index) = guardian_index {
+    if let Some(index) = guardian_index {
         // Update existing guardian
         box_rec.guardians[index] = guardian.clone();
-        true
     } else {
         // Add new guardian
         box_rec.guardians.push(guardian.clone());
-        true
     };
-
-    box_rec.updated_at = now_str();
 
     // Save the updated box
     let updated_box = store.update_box(box_rec).await?;
 
-    Ok((updated_box, was_updated))
+    Ok(updated_box)
 }
 
 // PATCH /boxes/owned/:id/guardian
@@ -226,8 +220,7 @@ where
     S: BoxStore,
 {
     // Let the helper function do the work
-    let (updated_box, _) =
-        update_or_add_guardian(&*store, &box_id, &user_id, &payload.guardian).await?;
+    let updated_box = update_or_add_guardian(&*store, &box_id, &user_id, &payload.guardian).await?;
 
     // Find the updated guardian in the updated box
     let updated_guardian = updated_box
@@ -254,13 +247,13 @@ where
 }
 
 // Helper function to update a document in a box
-// Returns (updated_box, was_document_updated)
+// Returns updated box
 async fn update_or_add_document<S>(
     store: &S,
     box_id: &str,
     owner_id: &str,
     document: &Document,
-) -> Result<(BoxRecord, bool)>
+) -> Result<BoxRecord>
 where
     S: BoxStore,
 {
@@ -277,22 +270,18 @@ where
     // Check if the document already exists in the box
     let document_index = box_rec.documents.iter().position(|d| d.id == document.id);
 
-    let was_updated = if let Some(index) = document_index {
+    if let Some(index) = document_index {
         // Update existing document
         box_rec.documents[index] = document.clone();
-        true
     } else {
         // Add new document
         box_rec.documents.push(document.clone());
-        true
     };
-
-    box_rec.updated_at = now_str();
 
     // Save the updated box
     let updated_box = store.update_box(box_rec).await?;
 
-    Ok((updated_box, was_updated))
+    Ok(updated_box)
 }
 
 // PATCH /boxes/owned/:id/document
@@ -307,8 +296,7 @@ where
     S: BoxStore,
 {
     // Let the helper function do the work
-    let (updated_box, _) =
-        update_or_add_document(&*store, &box_id, &user_id, &payload.document).await?;
+    let updated_box = update_or_add_document(&*store, &box_id, &user_id, &payload.document).await?;
 
     // Create a specialized response with all documents
     let response = DocumentUpdateResponse {
@@ -353,8 +341,6 @@ where
 
     // Remove the document
     box_rec.documents.remove(document_index.unwrap());
-    box_rec.updated_at = now_str();
-
     // Save the updated box
     let updated_box = store.update_box(box_rec).await?;
 
@@ -387,13 +373,13 @@ where
 }
 
 // Helper function to delete a guardian from a box
-// Returns updated box after deletion
+// Returns (updated box, deleted guardian) after deletion, with a single read
 async fn delete_guardian_from_box<S>(
     store: &S,
     box_id: &str,
     owner_id: &str,
     guardian_id: &str,
-) -> Result<BoxRecord>
+) -> Result<(BoxRecord, Guardian)>
 where
     S: BoxStore,
 {
@@ -407,25 +393,21 @@ where
         ));
     }
 
-    // Check if the guardian exists in the box
+    // Check if the guardian exists in the box and capture it for response
     let guardian_index = box_rec.guardians.iter().position(|g| g.id == guardian_id);
-
-    // Return not found if guardian doesn't exist
-    if guardian_index.is_none() {
-        return Err(AppError::not_found(format!(
-            "Guardian with ID {} not found in box {}",
-            guardian_id, box_id
-        )));
-    }
-
-    // Remove the guardian
-    box_rec.guardians.remove(guardian_index.unwrap());
-    box_rec.updated_at = now_str();
-
+    let removed_guardian = match guardian_index {
+        Some(index) => box_rec.guardians.remove(index),
+        None => {
+            return Err(AppError::not_found(format!(
+                "Guardian with ID {} not found in box {}",
+                guardian_id, box_id
+            )));
+        }
+    };
     // Save the updated box
     let updated_box = store.update_box(box_rec).await?;
 
-    Ok(updated_box)
+    Ok((updated_box, removed_guardian))
 }
 
 // DELETE /boxes/owned/:id/guardian/:guardian_id
@@ -438,17 +420,9 @@ pub async fn delete_guardian<S>(
 where
     S: BoxStore,
 {
-    // Get the guardian details before deletion
-    let box_rec_before = store.get_box(&box_id).await?;
-    let guardian_before = box_rec_before
-        .guardians
-        .iter()
-        .find(|g| g.id == guardian_id)
-        .ok_or_else(|| AppError::not_found(format!("Guardian with ID {} not found", guardian_id)))?
-        .clone();
-
-    // Use the helper function to delete the guardian
-    let updated_box = delete_guardian_from_box(&*store, &box_id, &user_id, &guardian_id).await?;
+    // Use the helper function to delete the guardian (single read)
+    let (updated_box, guardian_before) =
+        delete_guardian_from_box(&*store, &box_id, &user_id, &guardian_id).await?;
 
     // Create a response with the deleted guardian info and remaining guardians
     let response = GuardianUpdateResponse {

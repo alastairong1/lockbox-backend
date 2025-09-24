@@ -470,8 +470,12 @@ impl super::InvitationStore for DynamoInvitationStore {
             AttributeValue::S(creator_id.to_string()),
         )]);
 
-        log::info!("Query parameters: table={}, index={}, expression=creatorId = :creatorId, values={:?}", 
-                  self.table_name, GSI_CREATOR_ID, expr_attr_values);
+        log::info!(
+            "Query parameters: table={}, index={}, expression=creatorId = :creatorId, values={:?}",
+            self.table_name,
+            GSI_CREATOR_ID,
+            expr_attr_values
+        );
 
         let result = self
             .client
@@ -498,14 +502,18 @@ impl super::InvitationStore for DynamoInvitationStore {
                 .send()
                 .await
                 .map_err(|e| map_dynamo_error("scan", e))?;
-            
+
             let scan_items = scan_result.items();
             log::info!("Sample scan found {} items in table", scan_items.len());
             for (i, item) in scan_items.iter().enumerate() {
                 if let Some(creator_attr) = item.get("creatorId") {
                     log::info!("Sample item {}: creatorId = {:?}", i, creator_attr);
                 } else {
-                    log::info!("Sample item {}: no creatorId attribute found, available attributes: {:?}", i, item.keys().collect::<Vec<_>>());
+                    log::info!(
+                        "Sample item {}: no creatorId attribute found, available attributes: {:?}",
+                        i,
+                        item.keys().collect::<Vec<_>>()
+                    );
                 }
             }
         }

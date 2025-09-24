@@ -74,15 +74,15 @@ where
         .route("/invitations/:inviteId/refresh", patch(refresh_invitation))
         .route("/invitations/me", get(get_my_invitations))
         .layer(middleware::from_fn(auth_middleware));
-    
+
     // Public routes (no auth required)
-    let public_routes = Router::new()
-        .route("/invitations/view/:code", get(view_invitation_by_code));
-    
+    let public_routes =
+        Router::new().route("/invitations/view/:code", get(view_invitation_by_code));
+
     // Merge routes with state
     let api_routes = Router::new()
-        .merge(public_routes)  // Add public routes first
-        .merge(auth_routes)    // Then auth routes
+        .merge(public_routes) // Add public routes first
+        .merge(auth_routes) // Then auth routes
         .with_state(store);
 
     // Create the main router with the prefix

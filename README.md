@@ -36,7 +36,7 @@ Returns all boxes owned by the user, including complete details such as document
         {
           "id": "doc_id",
           "title": "Document Title",
-          "content": "Document content",
+          "encryptedContent": "Document content",
           "createdAt": "timestamp"
         }
       ],
@@ -101,7 +101,7 @@ Returns complete details of a specific box owned by the user, including all docu
       {
         "id": "doc_id",
         "title": "Document Title",
-        "content": "Document content",
+        "encryptedContent": "Document content",
         "createdAt": "timestamp"
       }
     ],
@@ -268,7 +268,7 @@ Allows box owners to add or update a document for their box. This is the dedicat
   "document": {
     "id": "document_id",
     "title": "Document Title",
-    "content": "This is the document content",
+    "encryptedContent": "This is the document content",
     "createdAt": "2023-05-25T12:00:00Z"
   }
 }
@@ -282,13 +282,13 @@ Allows box owners to add or update a document for their box. This is the dedicat
       {
         "id": "document_id",
         "title": "Document Title",
-        "content": "This is the document content",
+        "encryptedContent": "This is the document content",
         "createdAt": "2023-05-25T12:00:00Z"
       },
       {
         "id": "document_id_2",
         "title": "Another Document",
-        "content": "Content of another document",
+        "encryptedContent": "Content of another document",
         "createdAt": "2023-05-20T11:30:00Z"
       }
     ],
@@ -322,7 +322,7 @@ Allows box owners to delete a specific document from their box. This is a dedica
       {
         "id": "document_id_2",
         "title": "Another Document",
-        "content": "Content of another document",
+        "encryptedContent": "Content of another document",
         "createdAt": "2023-05-20T11:30:00Z"
       }
     ],
@@ -366,7 +366,7 @@ Returns all boxes where the authenticated user is a guardian (excluding rejected
         {
           "id": "doc_id",
           "title": "Document Title",
-          "content": "Document content",
+          "encryptedContent": "Document content",
           "createdAt": "timestamp"
         }
       ],
@@ -423,7 +423,7 @@ Get a specific box where you are a guardian, including complete details of docum
       {
         "id": "doc_id",
         "title": "Document Title",
-        "content": "Document content",
+        "encryptedContent": "Document content",
         "createdAt": "timestamp"
       }
     ],

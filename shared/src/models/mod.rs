@@ -140,7 +140,8 @@ pub struct Invitation {
 pub struct Document {
     pub id: String,
     pub title: String,
-    pub content: String,
+    #[serde(rename = "encryptedContent")]
+    pub encrypted_content: String,
     #[serde(rename = "createdAt")]
     pub created_at: String,
 }

@@ -13,17 +13,56 @@ use crate::errors::InvitationEventError; // Add AppError import
 type SharedBoxStore = Arc<dyn BoxStore + Send + Sync>;
 
 // Handler for invitation_created events
+// Note: We use the invite_code as a placeholder for the guardian name
+// The actual name isn't critical here since it's just for display to the owner
 pub async fn handle_invitation_created(
-    _state: SharedBoxStore, // Unused for now, prefixed with underscore
+    state: SharedBoxStore,
     event: &InvitationEvent,
 ) -> Result<(), AppError> {
     info!(
-        "Processing invitation_created event for box_id={}",
-        event.box_id
+        "Processing invitation_created event for box_id={}, invitation_id={}",
+        event.box_id, event.invitation_id
     );
 
-    // TODO: implement invitation‐created business logic here
+    // Get the box
+    let mut box_record = state.get_box(&event.box_id).await.map_err(|e| {
+        error!("Failed to get box {}: {}", event.box_id, e);
+        AppError::BoxNotFound(format!("Box not found: {}", event.box_id))
+    })?;
 
+    // Check if a guardian with this invitation_id already exists
+    let guardian_exists = box_record.guardians.iter().any(|g| g.invitation_id == event.invitation_id);
+
+    if guardian_exists {
+        info!("Guardian already exists for invitation_id={}, skipping creation", event.invitation_id);
+        return Ok(());
+    }
+
+    // Create the guardian record with 'Invited' status
+    // Use the invited_name from the event, or fall back to invite_code
+    let guardian_name = event.invited_name.clone()
+        .unwrap_or_else(|| format!("Pending ({})", &event.invite_code));
+
+    let guardian = lockbox_shared::models::Guardian {
+        id: String::new(), // Empty until invitation is linked to a user
+        name: guardian_name,
+        lead_guardian: false,
+        status: GuardianStatus::Invited,
+        added_at: chrono::Utc::now().to_rfc3339(),
+        invitation_id: event.invitation_id.clone(),
+    };
+
+    // Add guardian to box
+    box_record.guardians.push(guardian);
+    box_record.updated_at = chrono::Utc::now().to_rfc3339();
+
+    // Save the updated box
+    state.update_box(box_record).await.map_err(|e| {
+        error!("Failed to update box with new guardian: {}", e);
+        AppError::from(anyhow::anyhow!("Failed to create guardian: {}", e))
+    })?;
+
+    info!("Successfully created guardian for invitation: {}", event.invitation_id);
     Ok(())
 }
 

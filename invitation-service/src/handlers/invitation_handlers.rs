@@ -211,6 +211,7 @@ fn build_event_payload(invitation: &Invitation, event_type: &str) -> Result<serd
         "box_id": invitation.box_id,
         "user_id": invitation.linked_user_id,
         "invite_code": invitation.invite_code,
+        "invited_name": invitation.invited_name,
         "timestamp": Utc::now().to_rfc3339()
     }))
 }

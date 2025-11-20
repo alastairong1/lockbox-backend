@@ -682,7 +682,7 @@ async fn test_update_box_add_documents() {
         "document": {
             "id": "test_doc_1",
             "title": "Test Document",
-            "content": "This is a test document content",
+            "encryptedContent": "This is a test document content",
             "createdAt": "2023-01-01T12:00:00Z"
         }
     });
@@ -726,7 +726,7 @@ async fn test_update_box_add_documents() {
 
     if let Some(doc) = added_doc {
         assert_eq!(doc.title, "Test Document");
-        assert_eq!(doc.content, "This is a test document content");
+        assert_eq!(doc.encrypted_content, "This is a test document content");
     }
 }
 
@@ -1220,7 +1220,7 @@ async fn test_update_existing_document() {
         "document": {
             "id": "doc_to_update",
             "title": "Initial Title",
-            "content": "Initial content",
+            "encryptedContent": "Initial content",
             "createdAt": "2023-01-01T12:00:00Z"
         }
     });
@@ -1243,7 +1243,7 @@ async fn test_update_existing_document() {
         "document": {
             "id": "doc_to_update",
             "title": "Updated Title",
-            "content": "Updated content with more information",
+            "encryptedContent": "Updated content with more information",
             "createdAt": "2023-01-01T12:00:00Z"
         }
     });
@@ -1277,7 +1277,7 @@ async fn test_update_existing_document() {
     // Verify each field was updated correctly
     assert_eq!(updated_doc["title"].as_str().unwrap(), "Updated Title");
     assert_eq!(
-        updated_doc["content"].as_str().unwrap(),
+        updated_doc["encryptedContent"].as_str().unwrap(),
         "Updated content with more information"
     );
 }
@@ -1298,7 +1298,7 @@ async fn test_update_document_unauthorized() {
         "document": {
             "id": "unauthorized_doc",
             "title": "Unauthorized Document",
-            "content": "This should fail",
+            "encryptedContent": "This should fail",
             "createdAt": "2023-01-01T12:00:00Z"
         }
     });
@@ -1335,7 +1335,7 @@ async fn test_delete_document() {
         "document": {
             "id": "doc_to_delete",
             "title": "Document to Delete",
-            "content": "This document will be deleted",
+            "encryptedContent": "This document will be deleted",
             "createdAt": "2023-01-01T12:00:00Z"
         }
     });
@@ -1444,7 +1444,7 @@ async fn test_delete_document_unauthorized() {
         "document": {
             "id": "doc_in_box_2",
             "title": "Document in Box 2",
-            "content": "This document belongs to user_2's box",
+            "encryptedContent": "This document belongs to user_2's box",
             "createdAt": "2023-01-01T12:00:00Z"
         }
     });

@@ -576,3 +576,1037 @@ async fn test_get_my_invitations_empty() {
     let json_resp = response_to_json(response).await;
     assert!(json_resp.as_array().unwrap().is_empty());
 }
+
+// New tests for view invitation endpoint
+#[tokio::test]
+async fn test_view_invitation_by_code_success() {
+    let (app, store) = create_test_app().await;
+
+    let now = Utc::now();
+    let id = Uuid::new_v4().to_string();
+    let invite_code = "VIEWCODE".to_string();
+    let invitation = Invitation {
+        id: id.clone(),
+        invite_code: invite_code.clone(),
+        invited_name: "View Test User".to_string(),
+        box_id: "box-view-123".to_string(),
+        created_at: now.to_rfc3339(),
+        expires_at: (now + Duration::hours(48)).to_rfc3339(),
+        opened: false,
+        linked_user_id: None,
+        creator_id: "creator-view-id".to_string(),
+    };
+
+    debug!("Creating test invitation for viewing with code: {}", invite_code);
+    match &store {
+        TestStore::Mock(mock) => mock.create_invitation(invitation.clone()).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.create_invitation(invitation.clone()).await.unwrap(),
+    };
+
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        debug!("Adding delay for DynamoDB consistency");
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
+
+    let path = format!("/invitations/view/{}", invite_code);
+    let response = app
+        .clone()
+        .oneshot(create_test_request("GET", &path, "any-user-id", None))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json_resp = response_to_json(response).await;
+
+    // Verify response fields
+    assert_eq!(json_resp["id"], id);
+    assert_eq!(json_resp["inviteCode"], invite_code);
+    assert_eq!(json_resp["invitedName"], "View Test User");
+    assert_eq!(json_resp["boxId"], "box-view-123");
+    assert_eq!(json_resp["creatorId"], "creator-view-id");
+    assert_eq!(json_resp["opened"], false);
+    assert!(json_resp["linkedUserId"].is_null());
+    assert!(!json_resp["createdAt"].as_str().unwrap().is_empty());
+    assert!(!json_resp["expiresAt"].as_str().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_view_invitation_by_code_not_found() {
+    let (app, _store) = create_test_app().await;
+
+    let path = "/invitations/view/NOTFOUND";
+    let response = app
+        .clone()
+        .oneshot(create_test_request("GET", path, "any-user-id", None))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_view_invitation_by_code_expired() {
+    let (app, store) = create_test_app().await;
+
+    let now = Utc::now();
+    let id = Uuid::new_v4().to_string();
+    let invite_code = "EXPIRED2".to_string();
+    let invitation = Invitation {
+        id: id.clone(),
+        invite_code: invite_code.clone(),
+        invited_name: "Expired View User".to_string(),
+        box_id: "box-expired-view".to_string(),
+        created_at: (now - Duration::hours(50)).to_rfc3339(),
+        expires_at: (now - Duration::hours(2)).to_rfc3339(), // Expired 2 hours ago
+        opened: false,
+        linked_user_id: None,
+        creator_id: "creator-expired-id".to_string(),
+    };
+
+    debug!("Creating expired test invitation for viewing with code: {}", invite_code);
+    match &store {
+        TestStore::Mock(mock) => mock.create_invitation(invitation.clone()).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.create_invitation(invitation.clone()).await.unwrap(),
+    };
+
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        debug!("Adding delay for DynamoDB consistency");
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
+
+    let path = format!("/invitations/view/{}", invite_code);
+    let response = app
+        .clone()
+        .oneshot(create_test_request("GET", &path, "any-user-id", None))
+        .await
+        .unwrap();
+
+    // Should return 404 for expired invitations
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_view_invitation_does_not_consume_code() {
+    let (app, store) = create_test_app().await;
+
+    let now = Utc::now();
+    let id = Uuid::new_v4().to_string();
+    let invite_code = "NOCONSUM".to_string();
+    let invitation = Invitation {
+        id: id.clone(),
+        invite_code: invite_code.clone(),
+        invited_name: "Non-Consume User".to_string(),
+        box_id: "box-noconsum".to_string(),
+        created_at: now.to_rfc3339(),
+        expires_at: (now + Duration::hours(48)).to_rfc3339(),
+        opened: false,
+        linked_user_id: None,
+        creator_id: "creator-noconsum-id".to_string(),
+    };
+
+    debug!("Creating test invitation for non-consuming view with code: {}", invite_code);
+    match &store {
+        TestStore::Mock(mock) => mock.create_invitation(invitation.clone()).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.create_invitation(invitation.clone()).await.unwrap(),
+    };
+
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        debug!("Adding delay for DynamoDB consistency");
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
+
+    // View the invitation
+    let path = format!("/invitations/view/{}", invite_code);
+    let response = app
+        .clone()
+        .oneshot(create_test_request("GET", &path, "viewer-user-id", None))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Verify invitation was not consumed (opened = false, linkedUserId = None)
+    let viewed_inv = match &store {
+        TestStore::Mock(mock) => mock.get_invitation_by_code(&invite_code).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.get_invitation_by_code(&invite_code).await.unwrap(),
+    };
+
+    assert!(!viewed_inv.opened);
+    assert!(viewed_inv.linked_user_id.is_none());
+}
+
+// Tests for concurrent code redemption
+#[tokio::test]
+async fn test_concurrent_code_redemption_second_fails() {
+    let (app, store) = create_test_app().await;
+
+    let now = Utc::now();
+    let id = Uuid::new_v4().to_string();
+    let invite_code = "CONCUR01".to_string();
+    let invitation = Invitation {
+        id: id.clone(),
+        invite_code: invite_code.clone(),
+        invited_name: "Concurrent Test User".to_string(),
+        box_id: "box-concurrent-123".to_string(),
+        created_at: now.to_rfc3339(),
+        expires_at: (now + Duration::hours(48)).to_rfc3339(),
+        opened: false,
+        linked_user_id: None,
+        creator_id: "creator-concurrent-id".to_string(),
+    };
+
+    debug!("Creating test invitation for concurrent redemption with code: {}", invite_code);
+    match &store {
+        TestStore::Mock(mock) => mock.create_invitation(invitation.clone()).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.create_invitation(invitation.clone()).await.unwrap(),
+    };
+
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        debug!("Adding delay for DynamoDB consistency");
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
+
+    // First user redeems the code
+    let handle_payload_1 = json!({
+        "inviteCode": invite_code
+    });
+    let response1 = app
+        .clone()
+        .oneshot(create_test_request(
+            "PUT",
+            "/invitations/handle",
+            "user-first",
+            Some(handle_payload_1),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response1.status(), StatusCode::OK);
+    let json_resp1 = response_to_json(response1).await;
+    assert_eq!(json_resp1["boxId"], "box-concurrent-123");
+
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        debug!("Adding delay for DynamoDB consistency");
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
+
+    // Second user tries to redeem the same code
+    let handle_payload_2 = json!({
+        "inviteCode": invite_code
+    });
+    let response2 = app
+        .clone()
+        .oneshot(create_test_request(
+            "PUT",
+            "/invitations/handle",
+            "user-second",
+            Some(handle_payload_2),
+        ))
+        .await
+        .unwrap();
+
+    // Second redemption should fail with FORBIDDEN (invitation already used)
+    assert_eq!(response2.status(), StatusCode::FORBIDDEN);
+
+    // Verify invitation is linked to first user only
+    let final_inv = match &store {
+        TestStore::Mock(mock) => mock.get_invitation_by_code(&invite_code).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.get_invitation_by_code(&invite_code).await.unwrap(),
+    };
+
+    assert!(final_inv.opened);
+    assert_eq!(final_inv.linked_user_id, Some("user-first".to_string()));
+}
+
+#[tokio::test]
+async fn test_concurrent_code_redemption_truly_concurrent() {
+    let (app, store) = create_test_app().await;
+
+    let now = Utc::now();
+    let id = Uuid::new_v4().to_string();
+    let invite_code = "CONCUR02".to_string();
+    let invitation = Invitation {
+        id: id.clone(),
+        invite_code: invite_code.clone(),
+        invited_name: "Truly Concurrent User".to_string(),
+        box_id: "box-concurrent-456".to_string(),
+        created_at: now.to_rfc3339(),
+        expires_at: (now + Duration::hours(48)).to_rfc3339(),
+        opened: false,
+        linked_user_id: None,
+        creator_id: "creator-concurrent-id".to_string(),
+    };
+
+    debug!("Creating test invitation for truly concurrent redemption with code: {}", invite_code);
+    match &store {
+        TestStore::Mock(mock) => mock.create_invitation(invitation.clone()).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.create_invitation(invitation.clone()).await.unwrap(),
+    };
+
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        debug!("Adding delay for DynamoDB consistency");
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
+
+    // Simulate truly concurrent requests using tokio::spawn
+    let handle_payload_1 = json!({
+        "inviteCode": invite_code.clone()
+    });
+    let handle_payload_2 = json!({
+        "inviteCode": invite_code.clone()
+    });
+
+    let app1 = app.clone();
+    let app2 = app.clone();
+
+    let task1 = tokio::spawn(async move {
+        app1.oneshot(create_test_request(
+            "PUT",
+            "/invitations/handle",
+            "concurrent-user-1",
+            Some(handle_payload_1),
+        ))
+        .await
+    });
+
+    let task2 = tokio::spawn(async move {
+        app2.oneshot(create_test_request(
+            "PUT",
+            "/invitations/handle",
+            "concurrent-user-2",
+            Some(handle_payload_2),
+        ))
+        .await
+    });
+
+    let (result1, result2) = tokio::join!(task1, task2);
+    let response1 = result1.unwrap().unwrap();
+    let response2 = result2.unwrap().unwrap();
+
+    // One should succeed (OK) and one should fail (FORBIDDEN)
+    let statuses = vec![response1.status(), response2.status()];
+    assert!(
+        statuses.contains(&StatusCode::OK),
+        "One request should succeed"
+    );
+    assert!(
+        statuses.contains(&StatusCode::FORBIDDEN),
+        "One request should fail with FORBIDDEN"
+    );
+
+    // Verify invitation is linked to only one user
+    let final_inv = match &store {
+        TestStore::Mock(mock) => mock.get_invitation_by_code(&invite_code).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.get_invitation_by_code(&invite_code).await.unwrap(),
+    };
+
+    assert!(final_inv.opened);
+    assert!(final_inv.linked_user_id.is_some());
+    // Should be linked to either concurrent-user-1 or concurrent-user-2, but not both
+    let linked_user = final_inv.linked_user_id.unwrap();
+    assert!(
+        linked_user == "concurrent-user-1" || linked_user == "concurrent-user-2",
+        "Invitation should be linked to one of the concurrent users"
+    );
+}
+
+// Tests for invitation expiry edge cases
+#[tokio::test]
+async fn test_invitation_expires_at_exact_48_hour_mark() {
+    let (app, store) = create_test_app().await;
+
+    let now = Utc::now();
+    let id = Uuid::new_v4().to_string();
+    let invite_code = "EXACT48H".to_string();
+
+    // Create invitation that expires exactly 48 hours from creation
+    let created_time = now - Duration::hours(48);
+    let expires_time = now; // Expires right now
+
+    let invitation = Invitation {
+        id: id.clone(),
+        invite_code: invite_code.clone(),
+        invited_name: "Exact 48h User".to_string(),
+        box_id: "box-48h".to_string(),
+        created_at: created_time.to_rfc3339(),
+        expires_at: expires_time.to_rfc3339(),
+        opened: false,
+        linked_user_id: None,
+        creator_id: "creator-48h".to_string(),
+    };
+
+    debug!("Creating invitation that expires exactly now");
+    match &store {
+        TestStore::Mock(mock) => mock.create_invitation(invitation.clone()).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.create_invitation(invitation.clone()).await.unwrap(),
+    };
+
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        debug!("Adding delay for DynamoDB consistency");
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
+
+    // Try to handle invitation (should fail as expired)
+    let handle_payload = json!({
+        "inviteCode": invite_code
+    });
+    let response = app
+        .clone()
+        .oneshot(create_test_request(
+            "PUT",
+            "/invitations/handle",
+            "user-exact",
+            Some(handle_payload),
+        ))
+        .await
+        .unwrap();
+
+    // Should return 410 Gone for expired invitation
+    assert_eq!(response.status(), StatusCode::GONE);
+}
+
+#[tokio::test]
+async fn test_invitation_just_before_expiry() {
+    let (app, store) = create_test_app().await;
+
+    let now = Utc::now();
+    let id = Uuid::new_v4().to_string();
+    let invite_code = "JUSTBEFR".to_string();
+
+    // Create invitation that expires 1 minute from now
+    let expires_time = now + Duration::minutes(1);
+
+    let invitation = Invitation {
+        id: id.clone(),
+        invite_code: invite_code.clone(),
+        invited_name: "Just Before User".to_string(),
+        box_id: "box-before".to_string(),
+        created_at: now.to_rfc3339(),
+        expires_at: expires_time.to_rfc3339(),
+        opened: false,
+        linked_user_id: None,
+        creator_id: "creator-before".to_string(),
+    };
+
+    debug!("Creating invitation that expires in 1 minute");
+    match &store {
+        TestStore::Mock(mock) => mock.create_invitation(invitation.clone()).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.create_invitation(invitation.clone()).await.unwrap(),
+    };
+
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        debug!("Adding delay for DynamoDB consistency");
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
+
+    // Try to handle invitation (should succeed)
+    let handle_payload = json!({
+        "inviteCode": invite_code
+    });
+    let response = app
+        .clone()
+        .oneshot(create_test_request(
+            "PUT",
+            "/invitations/handle",
+            "user-before",
+            Some(handle_payload),
+        ))
+        .await
+        .unwrap();
+
+    // Should succeed with OK
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_invitation_timezone_handling() {
+    let (app, store) = create_test_app().await;
+
+    let now = Utc::now();
+    let id = Uuid::new_v4().to_string();
+    let invite_code = "TIMEZONE".to_string();
+
+    // Create invitation with explicit UTC timezone
+    let expires_time = now + Duration::hours(24);
+
+    let invitation = Invitation {
+        id: id.clone(),
+        invite_code: invite_code.clone(),
+        invited_name: "Timezone User".to_string(),
+        box_id: "box-tz".to_string(),
+        created_at: now.to_rfc3339(),
+        expires_at: expires_time.to_rfc3339(), // RFC3339 includes timezone
+        opened: false,
+        linked_user_id: None,
+        creator_id: "creator-tz".to_string(),
+    };
+
+    debug!("Creating invitation with UTC timezone");
+    match &store {
+        TestStore::Mock(mock) => mock.create_invitation(invitation.clone()).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.create_invitation(invitation.clone()).await.unwrap(),
+    };
+
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        debug!("Adding delay for DynamoDB consistency");
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
+
+    // Verify invitation can be retrieved and expiry is correctly parsed
+    let retrieved_inv = match &store {
+        TestStore::Mock(mock) => mock.get_invitation_by_code(&invite_code).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.get_invitation_by_code(&invite_code).await.unwrap(),
+    };
+
+    // Parse expiry and verify it's in the future
+    let parsed_expiry = chrono::DateTime::parse_from_rfc3339(&retrieved_inv.expires_at).unwrap();
+    assert!(parsed_expiry > now);
+}
+
+#[tokio::test]
+async fn test_refresh_resets_expiry_correctly() {
+    let (app, store) = create_test_app().await;
+
+    let now = Utc::now();
+    let id = Uuid::new_v4().to_string();
+    let old_code = "RESETEXP".to_string();
+
+    // Create invitation that will expire soon
+    let old_expiry = now + Duration::hours(1); // Expires in 1 hour
+
+    let invitation = Invitation {
+        id: id.clone(),
+        invite_code: old_code.clone(),
+        invited_name: "Reset Expiry User".to_string(),
+        box_id: "box-reset".to_string(),
+        created_at: (now - Duration::hours(47)).to_rfc3339(), // Created 47 hours ago
+        expires_at: old_expiry.to_rfc3339(),
+        opened: false,
+        linked_user_id: None,
+        creator_id: "creator-reset".to_string(),
+    };
+
+    debug!("Creating invitation with old expiry time");
+    match &store {
+        TestStore::Mock(mock) => mock.create_invitation(invitation.clone()).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.create_invitation(invitation.clone()).await.unwrap(),
+    };
+
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        debug!("Adding delay for DynamoDB consistency");
+        tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
+    }
+
+    let path = format!("/invitations/{}/refresh", id);
+    let response = app
+        .clone()
+        .oneshot(create_test_request("PATCH", &path, "creator-reset", None))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json_resp = response_to_json(response).await;
+
+    // Verify new expiry is ~48 hours from now (not from original creation)
+    let new_expiry_str = json_resp["expiresAt"].as_str().unwrap();
+    let new_expiry = chrono::DateTime::parse_from_rfc3339(new_expiry_str)
+        .unwrap()
+        .with_timezone(&Utc);
+    let now_check = Utc::now();
+    let diff_secs = (new_expiry - now_check).num_seconds();
+
+    assert!(
+        diff_secs >= 47 * 3600 && diff_secs <= 49 * 3600,
+        "Expiry should be reset to ~48 hours from refresh time, got {} seconds",
+        diff_secs
+    );
+}
+
+#[tokio::test]
+async fn test_expiry_persists_across_view_operations() {
+    let (app, store) = create_test_app().await;
+
+    let now = Utc::now();
+    let id = Uuid::new_v4().to_string();
+    let invite_code = "VIEWPERS".to_string();
+    let expires_time = now + Duration::hours(24);
+
+    let invitation = Invitation {
+        id: id.clone(),
+        invite_code: invite_code.clone(),
+        invited_name: "View Persist User".to_string(),
+        box_id: "box-persist".to_string(),
+        created_at: now.to_rfc3339(),
+        expires_at: expires_time.to_rfc3339(),
+        opened: false,
+        linked_user_id: None,
+        creator_id: "creator-persist".to_string(),
+    };
+
+    debug!("Creating invitation to test expiry persistence");
+    match &store {
+        TestStore::Mock(mock) => mock.create_invitation(invitation.clone()).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.create_invitation(invitation.clone()).await.unwrap(),
+    };
+
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        debug!("Adding delay for DynamoDB consistency");
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
+
+    // View invitation (should not modify expiry)
+    let path = format!("/invitations/view/{}", invite_code);
+    let response = app
+        .clone()
+        .oneshot(create_test_request("GET", &path, "viewer-user", None))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json_resp = response_to_json(response).await;
+
+    // Verify expiry hasn't changed
+    assert_eq!(json_resp["expiresAt"].as_str().unwrap(), expires_time.to_rfc3339());
+
+    // Verify in database too
+    let db_inv = match &store {
+        TestStore::Mock(mock) => mock.get_invitation_by_code(&invite_code).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.get_invitation_by_code(&invite_code).await.unwrap(),
+    };
+
+    assert_eq!(db_inv.expires_at, expires_time.to_rfc3339());
+}
+
+// Tests for code collision probability
+#[tokio::test]
+async fn test_code_uniqueness_small_batch() {
+    let (app, _store) = create_test_app().await;
+
+    let mut codes = std::collections::HashSet::new();
+    let num_codes = 100;
+
+    // Generate 100 invitation codes
+    for i in 0..num_codes {
+        let payload = json!({
+            "invitedName": format!("User {}", i),
+            "boxId": "box-unique"
+        });
+
+        let response = app
+            .clone()
+            .oneshot(create_test_request(
+                "POST",
+                "/invitations/new",
+                "creator-unique",
+                Some(payload),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let json_resp = response_to_json(response).await;
+        let code = json_resp["inviteCode"].as_str().unwrap().to_string();
+
+        // Verify code is 8 characters
+        assert_eq!(code.len(), 8);
+
+        // Verify code uses only A-Z
+        assert!(code.chars().all(|c| c.is_ascii_uppercase()));
+
+        // Add to set (will fail if duplicate)
+        assert!(codes.insert(code.clone()), "Found duplicate code: {}", code);
+    }
+
+    // Verify all codes are unique
+    assert_eq!(codes.len(), num_codes);
+}
+
+#[tokio::test]
+async fn test_code_uniqueness_medium_batch() {
+    let (app, _store) = create_test_app().await;
+
+    let mut codes = std::collections::HashSet::new();
+    let num_codes = 1000;
+
+    info!("Generating {} invitation codes to test uniqueness", num_codes);
+
+    // Generate 1000 invitation codes
+    for i in 0..num_codes {
+        let payload = json!({
+            "invitedName": format!("User {}", i),
+            "boxId": format!("box-{}", i % 10) // Distribute across 10 boxes
+        });
+
+        let response = app
+            .clone()
+            .oneshot(create_test_request(
+                "POST",
+                "/invitations/new",
+                "creator-medium",
+                Some(payload),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let json_resp = response_to_json(response).await;
+        let code = json_resp["inviteCode"].as_str().unwrap().to_string();
+
+        // Add to set (will fail if duplicate)
+        if !codes.insert(code.clone()) {
+            panic!("Found duplicate code at iteration {}: {}", i, code);
+        }
+    }
+
+    // Verify all codes are unique
+    assert_eq!(codes.len(), num_codes);
+    info!("Successfully generated {} unique codes", codes.len());
+}
+
+#[tokio::test]
+async fn test_code_alphabet_distribution() {
+    let (app, _store) = create_test_app().await;
+
+    let mut char_counts: std::collections::HashMap<char, usize> = std::collections::HashMap::new();
+    let num_codes = 200;
+
+    // Generate codes and count character occurrences
+    for i in 0..num_codes {
+        let payload = json!({
+            "invitedName": format!("User {}", i),
+            "boxId": "box-dist"
+        });
+
+        let response = app
+            .clone()
+            .oneshot(create_test_request(
+                "POST",
+                "/invitations/new",
+                "creator-dist",
+                Some(payload),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let json_resp = response_to_json(response).await;
+        let code = json_resp["inviteCode"].as_str().unwrap();
+
+        // Count characters
+        for ch in code.chars() {
+            *char_counts.entry(ch).or_insert(0) += 1;
+        }
+    }
+
+    // Verify all 26 letters appear at least once (statistically very likely)
+    let total_letters = ('A'..='Z').count();
+    let letters_used = char_counts.len();
+
+    info!("Used {} out of {} possible letters", letters_used, total_letters);
+    info!("Character distribution: {:?}", char_counts);
+
+    // With 200 codes * 8 chars = 1600 characters, we expect most letters to appear
+    // Allow some variance, but should have at least 20 different letters
+    assert!(
+        letters_used >= 20,
+        "Expected at least 20 different letters, got {}",
+        letters_used
+    );
+}
+
+#[tokio::test]
+async fn test_code_collision_probability_calculation() {
+    // This test verifies the theoretical collision probability
+    // 26^8 = 208,827,064,576 possible codes
+    // For 1000 codes, collision probability is approximately 1 - e^(-1000^2 / (2 * 208827064576))
+    // Which is extremely low (< 0.000001%)
+
+    let alphabet_size = 26u64;
+    let code_length = 8u64;
+    let total_combinations = alphabet_size.pow(code_length as u32);
+
+    info!("Total possible combinations: {}", total_combinations);
+    assert_eq!(total_combinations, 208_827_064_576);
+
+    // For practical purposes, with our expected usage:
+    // - Average box has 3-5 guardians
+    // - Average user has 2-3 boxes
+    // - 10,000 active users = ~150,000 total invitations
+    // Collision probability is negligible
+
+    let expected_invitations = 150_000u64;
+    let collision_probability = (expected_invitations as f64).powi(2)
+        / (2.0 * total_combinations as f64);
+
+    info!("Expected invitations: {}", expected_invitations);
+    info!("Theoretical collision probability: {:.10}", collision_probability);
+
+    // Probability should be less than 0.0001 (0.01%)
+    assert!(collision_probability < 0.0001);
+}
+
+// Tests for code lookup performance
+#[tokio::test]
+async fn test_code_lookup_performance_active_codes() {
+    let (app, store) = create_test_app().await;
+
+    let now = Utc::now();
+    let num_codes = 50;
+    let mut codes = Vec::new();
+
+    // Create 50 active invitation codes
+    for i in 0..num_codes {
+        let id = Uuid::new_v4().to_string();
+        let code = format!("PERF{:04}", i);
+        codes.push(code.clone());
+
+        let invitation = Invitation {
+            id: id.clone(),
+            invite_code: code,
+            invited_name: format!("Perf User {}", i),
+            box_id: format!("box-{}", i),
+            created_at: now.to_rfc3339(),
+            expires_at: (now + Duration::hours(48)).to_rfc3339(),
+            opened: false,
+            linked_user_id: None,
+            creator_id: format!("creator-{}", i % 5), // 5 different creators
+        };
+
+        match &store {
+            TestStore::Mock(mock) => mock.create_invitation(invitation).await.unwrap(),
+            TestStore::DynamoDB(dynamo) => dynamo.create_invitation(invitation).await.unwrap(),
+        };
+    }
+
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        debug!("Adding delay for DynamoDB consistency");
+        tokio::time::sleep(tokio::time::Duration::from_millis(3000)).await;
+    }
+
+    // Measure lookup time for each code
+    let mut total_duration = tokio::time::Duration::from_millis(0);
+    for code in &codes {
+        let start = tokio::time::Instant::now();
+
+        let handle_payload = json!({
+            "inviteCode": code
+        });
+        let response = app
+            .clone()
+            .oneshot(create_test_request(
+                "PUT",
+                "/invitations/handle",
+                "user-perf",
+                Some(handle_payload),
+            ))
+            .await
+            .unwrap();
+
+        let duration = start.elapsed();
+        total_duration += duration;
+
+        // Each lookup should succeed
+        assert!(
+            response.status() == StatusCode::OK || response.status() == StatusCode::FORBIDDEN,
+            "Lookup failed for code: {}",
+            code
+        );
+
+        debug!("Lookup for {} took {:?}", code, duration);
+    }
+
+    let avg_duration = total_duration / num_codes as u32;
+    info!("Average lookup time: {:?}", avg_duration);
+
+    // Average lookup should be under 500ms (generous for test environment)
+    assert!(
+        avg_duration < tokio::time::Duration::from_millis(500),
+        "Average lookup time too high: {:?}",
+        avg_duration
+    );
+}
+
+#[tokio::test]
+async fn test_code_lookup_performance_mixed_dataset() {
+    let (app, store) = create_test_app().await;
+
+    let now = Utc::now();
+    let num_active = 20;
+    let num_expired = 20;
+
+    // Create mix of active and expired invitations
+    for i in 0..num_active {
+        let id = Uuid::new_v4().to_string();
+        let code = format!("ACTV{:04}", i);
+
+        let invitation = Invitation {
+            id,
+            invite_code: code,
+            invited_name: format!("Active User {}", i),
+            box_id: format!("box-{}", i),
+            created_at: now.to_rfc3339(),
+            expires_at: (now + Duration::hours(24)).to_rfc3339(),
+            opened: false,
+            linked_user_id: None,
+            creator_id: "creator-mixed".to_string(),
+        };
+
+        match &store {
+            TestStore::Mock(mock) => mock.create_invitation(invitation).await.unwrap(),
+            TestStore::DynamoDB(dynamo) => dynamo.create_invitation(invitation).await.unwrap(),
+        };
+    }
+
+    for i in 0..num_expired {
+        let id = Uuid::new_v4().to_string();
+        let code = format!("EXPR{:04}", i);
+
+        let invitation = Invitation {
+            id,
+            invite_code: code,
+            invited_name: format!("Expired User {}", i),
+            box_id: format!("box-{}", i + 100),
+            created_at: (now - Duration::hours(50)).to_rfc3339(),
+            expires_at: (now - Duration::hours(2)).to_rfc3339(), // Expired
+            opened: false,
+            linked_user_id: None,
+            creator_id: "creator-mixed".to_string(),
+        };
+
+        match &store {
+            TestStore::Mock(mock) => mock.create_invitation(invitation).await.unwrap(),
+            TestStore::DynamoDB(dynamo) => dynamo.create_invitation(invitation).await.unwrap(),
+        };
+    }
+
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        debug!("Adding delay for DynamoDB consistency");
+        tokio::time::sleep(tokio::time::Duration::from_millis(3000)).await;
+    }
+
+    // Test lookup performance on active codes
+    let start = tokio::time::Instant::now();
+    let handle_payload = json!({
+        "inviteCode": "ACTV0000"
+    });
+    let response = app
+        .clone()
+        .oneshot(create_test_request(
+            "PUT",
+            "/invitations/handle",
+            "user-mixed",
+            Some(handle_payload),
+        ))
+        .await
+        .unwrap();
+    let active_duration = start.elapsed();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    info!("Active code lookup time: {:?}", active_duration);
+
+    // Test lookup performance on expired codes
+    let start = tokio::time::Instant::now();
+    let handle_payload = json!({
+        "inviteCode": "EXPR0000"
+    });
+    let response = app
+        .clone()
+        .oneshot(create_test_request(
+            "PUT",
+            "/invitations/handle",
+            "user-mixed",
+            Some(handle_payload),
+        ))
+        .await
+        .unwrap();
+    let expired_duration = start.elapsed();
+
+    assert_eq!(response.status(), StatusCode::GONE);
+    info!("Expired code lookup time: {:?}", expired_duration);
+
+    // Both should be reasonably fast (under 500ms)
+    assert!(active_duration < tokio::time::Duration::from_millis(500));
+    assert!(expired_duration < tokio::time::Duration::from_millis(500));
+}
+
+#[tokio::test]
+async fn test_gsi_query_performance() {
+    let (app, store) = create_test_app().await;
+
+    if !matches!(store, TestStore::DynamoDB(_)) {
+        info!("Skipping GSI performance test for non-DynamoDB store");
+        return;
+    }
+
+    let now = Utc::now();
+    let creator_id = "creator-gsi-perf";
+    let num_invitations = 30;
+
+    // Create multiple invitations for same creator
+    for i in 0..num_invitations {
+        let payload = json!({
+            "invitedName": format!("GSI User {}", i),
+            "boxId": format!("box-{}", i)
+        });
+
+        let response = app
+            .clone()
+            .oneshot(create_test_request(
+                "POST",
+                "/invitations/new",
+                creator_id,
+                Some(payload),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    // Add delay for DynamoDB consistency
+    debug!("Adding delay for DynamoDB consistency");
+    tokio::time::sleep(tokio::time::Duration::from_millis(3000)).await;
+
+    // Query all invitations for creator (uses GSI)
+    let start = tokio::time::Instant::now();
+    let response = app
+        .clone()
+        .oneshot(create_test_request(
+            "GET",
+            "/invitations/me",
+            creator_id,
+            None,
+        ))
+        .await
+        .unwrap();
+    let query_duration = start.elapsed();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json_resp = response_to_json(response).await;
+    let invitations = json_resp.as_array().unwrap();
+
+    info!("GSI query returned {} invitations in {:?}", invitations.len(), query_duration);
+
+    // Should return all invitations
+    assert_eq!(invitations.len(), num_invitations);
+
+    // GSI query should be fast (under 1 second for 30 items)
+    assert!(
+        query_duration < tokio::time::Duration::from_secs(1),
+        "GSI query took too long: {:?}",
+        query_duration
+    );
+}

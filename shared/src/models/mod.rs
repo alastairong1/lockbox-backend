@@ -142,8 +142,8 @@ pub struct Invitation {
 pub struct Document {
     pub id: String,
     pub title: String,
-    #[serde(rename = "encryptedContent")]
-    pub encrypted_content: String,
+    #[serde(rename = "encryptedContent", skip_serializing_if = "Option::is_none")]
+    pub encrypted_content: Option<String>,
     #[serde(rename = "createdAt")]
     pub created_at: String,
 }

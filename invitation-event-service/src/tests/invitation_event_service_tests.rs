@@ -108,7 +108,14 @@ fn create_test_sns_event_with_name(
     user_id: &str,
     invited_name: Option<String>,
 ) -> LambdaEvent<SnsEvent> {
-    create_test_sns_event_full(event_type, invitation_id, box_id, user_id, invited_name, false)
+    create_test_sns_event_full(
+        event_type,
+        invitation_id,
+        box_id,
+        user_id,
+        invited_name,
+        false,
+    )
 }
 
 // Full helper to create an SNS event with all optional fields for testing
@@ -126,7 +133,11 @@ fn create_test_sns_event_full(
         invitation_id: invitation_id.to_string(),
         box_id: box_id.to_string(),
         timestamp: chrono::Utc::now().to_rfc3339(),
-        user_id: if user_id.is_empty() { None } else { Some(user_id.to_string()) },
+        user_id: if user_id.is_empty() {
+            None
+        } else {
+            Some(user_id.to_string())
+        },
         invite_code: "test-code".to_string(),
         invited_name,
         is_lead_guardian,
@@ -270,7 +281,7 @@ async fn test_invitation_created_handler_without_name() {
         "invitation_created",
         invitation_id,
         box_id,
-        "", // No user_id for invitation_created events
+        "",   // No user_id for invitation_created events
         None, // No invited_name - should use fallback
     );
 
@@ -437,7 +448,10 @@ async fn test_invitation_created_lead_guardian() {
 
     let guardian = &box_record.guardians[0];
     assert_eq!(guardian.name, invited_name);
-    assert_eq!(guardian.lead_guardian, true, "Guardian should be marked as lead guardian");
+    assert_eq!(
+        guardian.lead_guardian, true,
+        "Guardian should be marked as lead guardian"
+    );
     assert_eq!(guardian.status, GuardianStatus::Invited);
     assert_eq!(guardian.invitation_id, invitation_id);
 }

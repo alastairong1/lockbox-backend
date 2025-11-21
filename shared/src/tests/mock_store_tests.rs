@@ -91,6 +91,7 @@ async fn test_mock_invitation_store() {
         opened: false,
         linked_user_id: None,
         creator_id: creator_id.to_string(),
+        is_lead_guardian: false,
     };
 
     // Store the invitation

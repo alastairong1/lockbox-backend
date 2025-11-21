@@ -142,11 +142,7 @@ fn create_test_boxes(now: &str) -> Vec<BoxRecord> {
     boxes
 }
 
-async fn upsert_guardians(
-    store: &TestStore,
-    box_id: &str,
-    guardians: Vec<Guardian>,
-) {
+async fn upsert_guardians(store: &TestStore, box_id: &str, guardians: Vec<Guardian>) {
     let mut box_record = match store {
         TestStore::Mock(mock) => mock.get_box(box_id).await.unwrap(),
         TestStore::DynamoDB(dynamo) => dynamo.get_box(box_id).await.unwrap(),
@@ -726,7 +722,10 @@ async fn test_update_box_add_documents() {
 
     if let Some(doc) = added_doc {
         assert_eq!(doc.title, "Test Document");
-        assert_eq!(doc.encrypted_content, "This is a test document content");
+        assert_eq!(
+            doc.encrypted_content,
+            Some("This is a test document content".to_string())
+        );
     }
 }
 
@@ -1134,10 +1133,7 @@ async fn test_delete_guardian_success() {
         TestStore::DynamoDB(dynamo) => dynamo.get_box("box_1").await.unwrap(),
     };
     assert!(
-        box_after
-            .guardians
-            .iter()
-            .all(|g| g.id != guardian_id),
+        box_after.guardians.iter().all(|g| g.id != guardian_id),
         "Guardian should be removed from the box"
     );
 }
@@ -1171,7 +1167,10 @@ async fn test_delete_guardian_unauthorized() {
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let body = response_to_json(response).await;
-    assert_eq!(body["error"], "You don't have permission to delete guardians from this box");
+    assert_eq!(
+        body["error"],
+        "You don't have permission to delete guardians from this box"
+    );
 }
 
 #[tokio::test]

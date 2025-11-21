@@ -216,11 +216,7 @@ async fn add_test_data_to_store(store: &TestStore) {
     }
 }
 
-async fn replace_guardian(
-    store: &TestStore,
-    box_id: &str,
-    guardian: Guardian,
-) {
+async fn replace_guardian(store: &TestStore, box_id: &str, guardian: Guardian) {
     let mut record = match store {
         TestStore::Mock(mock) => mock.get_box(box_id).await.unwrap(),
         TestStore::DynamoDB(dynamo) => dynamo.get_box(box_id).await.unwrap(),
@@ -800,7 +796,12 @@ async fn test_accept_guardian_invitation() {
         invitation_id: "inv-pending".into(),
     };
 
-    replace_guardian(&store, "11111111-1111-1111-1111-111111111111", pending_guardian.clone()).await;
+    replace_guardian(
+        &store,
+        "11111111-1111-1111-1111-111111111111",
+        pending_guardian.clone(),
+    )
+    .await;
 
     let response = app
         .clone()
@@ -850,7 +851,12 @@ async fn test_reject_guardian_invitation() {
         invitation_id: "inv-pending".into(),
     };
 
-    replace_guardian(&store, "11111111-1111-1111-1111-111111111111", pending_guardian.clone()).await;
+    replace_guardian(
+        &store,
+        "11111111-1111-1111-1111-111111111111",
+        pending_guardian.clone(),
+    )
+    .await;
 
     let response = app
         .clone()
@@ -900,7 +906,12 @@ async fn test_guardian_invitation_without_pending_status() {
         invitation_id: "inv-accepted".into(),
     };
 
-    replace_guardian(&store, "11111111-1111-1111-1111-111111111111", accepted_guardian.clone()).await;
+    replace_guardian(
+        &store,
+        "11111111-1111-1111-1111-111111111111",
+        accepted_guardian.clone(),
+    )
+    .await;
 
     let response = app
         .clone()

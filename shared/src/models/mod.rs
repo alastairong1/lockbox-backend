@@ -261,6 +261,7 @@ mod tests {
             id: "test-id".to_string(),
             invite_code: "TESTCODE".to_string(),
             invited_name: "Test User".to_string(),
+            is_lead_guardian: false,
             box_id: "box-123".to_string(),
             created_at: "2024-01-01T00:00:00Z".to_string(),
             expires_at: "2024-01-02T00:00:00Z".to_string(),

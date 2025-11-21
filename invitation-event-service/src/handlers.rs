@@ -31,16 +31,24 @@ pub async fn handle_invitation_created(
     })?;
 
     // Check if a guardian with this invitation_id already exists
-    let guardian_exists = box_record.guardians.iter().any(|g| g.invitation_id == event.invitation_id);
+    let guardian_exists = box_record
+        .guardians
+        .iter()
+        .any(|g| g.invitation_id == event.invitation_id);
 
     if guardian_exists {
-        info!("Guardian already exists for invitation_id={}, skipping creation", event.invitation_id);
+        info!(
+            "Guardian already exists for invitation_id={}, skipping creation",
+            event.invitation_id
+        );
         return Ok(());
     }
 
     // Create the guardian record with 'Invited' status
     // Use the invited_name from the event, or fall back to invite_code
-    let guardian_name = event.invited_name.clone()
+    let guardian_name = event
+        .invited_name
+        .clone()
         .unwrap_or_else(|| format!("Pending ({})", &event.invite_code));
 
     let guardian = lockbox_shared::models::Guardian {
@@ -62,7 +70,10 @@ pub async fn handle_invitation_created(
         AppError::from(anyhow::anyhow!("Failed to create guardian: {}", e))
     })?;
 
-    info!("Successfully created guardian for invitation: {}", event.invitation_id);
+    info!(
+        "Successfully created guardian for invitation: {}",
+        event.invitation_id
+    );
     Ok(())
 }
 

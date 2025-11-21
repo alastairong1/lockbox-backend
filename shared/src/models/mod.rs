@@ -133,6 +133,8 @@ pub struct Invitation {
     pub linked_user_id: Option<String>, // To be filled upon open
     #[serde(rename = "creatorId")]
     pub creator_id: String, // ID of the user who created the invitation
+    #[serde(rename = "isLeadGuardian", default)]
+    pub is_lead_guardian: bool, // Whether this guardian should be marked as lead
 }
 
 // Box-related models

@@ -97,14 +97,39 @@ fn create_test_sns_event(
     box_id: &str,
     user_id: &str,
 ) -> LambdaEvent<SnsEvent> {
+    create_test_sns_event_with_name(event_type, invitation_id, box_id, user_id, None)
+}
+
+// Helper to create an SNS event with optional invited_name and is_lead_guardian for testing
+fn create_test_sns_event_with_name(
+    event_type: &str,
+    invitation_id: &str,
+    box_id: &str,
+    user_id: &str,
+    invited_name: Option<String>,
+) -> LambdaEvent<SnsEvent> {
+    create_test_sns_event_full(event_type, invitation_id, box_id, user_id, invited_name, false)
+}
+
+// Full helper to create an SNS event with all optional fields for testing
+fn create_test_sns_event_full(
+    event_type: &str,
+    invitation_id: &str,
+    box_id: &str,
+    user_id: &str,
+    invited_name: Option<String>,
+    is_lead_guardian: bool,
+) -> LambdaEvent<SnsEvent> {
     // Create invitation event
     let invitation_event = InvitationEvent {
         event_type: event_type.to_string(),
         invitation_id: invitation_id.to_string(),
         box_id: box_id.to_string(),
         timestamp: chrono::Utc::now().to_rfc3339(),
-        user_id: Some(user_id.to_string()),
+        user_id: if user_id.is_empty() { None } else { Some(user_id.to_string()) },
         invite_code: "test-code".to_string(),
+        invited_name,
+        is_lead_guardian,
     };
 
     // Serialize to JSON
@@ -144,6 +169,277 @@ fn create_test_sns_event(
         payload: sns_event,
         context: lambda_runtime::Context::default(),
     }
+}
+
+#[tokio::test]
+async fn test_invitation_created_handler() {
+    // Create test store
+    let store = create_test_store().await;
+
+    // Create test SNS event for invitation_created
+    let box_id = "test_box_create_456";
+    let invitation_id = "test_invitation_create_789";
+    let invited_name = "Alice Smith";
+    let event = create_test_sns_event_with_name(
+        "invitation_created",
+        invitation_id,
+        box_id,
+        "", // No user_id for invitation_created events
+        Some(invited_name.to_string()),
+    );
+
+    // Create a test box record without any guardians initially
+    let box_record = lockbox_shared::models::BoxRecord {
+        id: box_id.to_string(),
+        name: "Test Box".to_string(),
+        description: "Test Description".to_string(),
+        is_locked: false,
+        created_at: "2023-01-01T00:00:00Z".to_string(),
+        updated_at: "2023-01-01T00:00:00Z".to_string(),
+        owner_id: "test_owner".to_string(),
+        owner_name: Some("Test Owner".to_string()),
+        documents: vec![],
+        guardians: vec![], // Start with no guardians
+        unlock_instructions: None,
+        unlock_request: None,
+        version: 0,
+    };
+
+    // Add test box to store
+    let _ = store.create_box(box_record).await.unwrap();
+
+    // Call handler with the appropriate box store
+    let result = store.handle_event(event).await;
+    assert!(result.is_ok(), "Handler failed: {:?}", result.err());
+
+    // Verify guardian was created correctly after invitation_created event
+    let box_result = store.get_box(box_id).await;
+    assert!(
+        box_result.is_ok(),
+        "Failed to retrieve box: {:?}",
+        box_result.err()
+    );
+
+    // Get the box record and examine it
+    let box_record = box_result.unwrap();
+
+    // Verify a guardian was created
+    assert_eq!(
+        box_record.guardians.len(),
+        1,
+        "Exactly one guardian should be created"
+    );
+
+    // Find the guardian with the matching invitation_id
+    let guardian = box_record
+        .guardians
+        .iter()
+        .find(|g| g.invitation_id == invitation_id)
+        .expect("Guardian with matching invitation_id should exist");
+
+    // Verify guardian fields
+    assert_eq!(
+        guardian.id, "",
+        "Guardian id should be empty until invitation is opened"
+    );
+    assert_eq!(
+        guardian.name, invited_name,
+        "Guardian name should match invited_name from event"
+    );
+    assert_eq!(
+        guardian.status,
+        GuardianStatus::Invited,
+        "Guardian status should be 'Invited'"
+    );
+    assert_eq!(guardian.lead_guardian, false, "Should not be lead guardian");
+    assert_eq!(
+        guardian.invitation_id, invitation_id,
+        "Guardian invitation_id should match event"
+    );
+}
+
+#[tokio::test]
+async fn test_invitation_created_handler_without_name() {
+    // Create test store
+    let store = create_test_store().await;
+
+    // Create test SNS event for invitation_created without invited_name
+    let box_id = "test_box_create_no_name";
+    let invitation_id = "test_invitation_create_no_name";
+    let event = create_test_sns_event_with_name(
+        "invitation_created",
+        invitation_id,
+        box_id,
+        "", // No user_id for invitation_created events
+        None, // No invited_name - should use fallback
+    );
+
+    // Create a test box record without any guardians initially
+    let box_record = lockbox_shared::models::BoxRecord {
+        id: box_id.to_string(),
+        name: "Test Box".to_string(),
+        description: "Test Description".to_string(),
+        is_locked: false,
+        created_at: "2023-01-01T00:00:00Z".to_string(),
+        updated_at: "2023-01-01T00:00:00Z".to_string(),
+        owner_id: "test_owner".to_string(),
+        owner_name: Some("Test Owner".to_string()),
+        documents: vec![],
+        guardians: vec![], // Start with no guardians
+        unlock_instructions: None,
+        unlock_request: None,
+        version: 0,
+    };
+
+    // Add test box to store
+    let _ = store.create_box(box_record).await.unwrap();
+
+    // Call handler with the appropriate box store
+    let result = store.handle_event(event).await;
+    assert!(result.is_ok(), "Handler failed: {:?}", result.err());
+
+    // Verify guardian was created with fallback name
+    let box_result = store.get_box(box_id).await;
+    assert!(box_result.is_ok());
+
+    let box_record = box_result.unwrap();
+    assert_eq!(box_record.guardians.len(), 1);
+
+    let guardian = &box_record.guardians[0];
+
+    // Verify fallback name format: "Pending (CODE)"
+    assert!(
+        guardian.name.starts_with("Pending ("),
+        "Guardian name should use fallback format when invited_name is None"
+    );
+    assert_eq!(guardian.status, GuardianStatus::Invited);
+    assert_eq!(guardian.invitation_id, invitation_id);
+}
+
+#[tokio::test]
+async fn test_invitation_created_idempotency() {
+    // Create test store
+    let store = create_test_store().await;
+
+    let box_id = "test_box_idempotent";
+    let invitation_id = "test_invitation_idempotent";
+    let invited_name = "Bob Jones";
+
+    // Create a test box with a guardian already having this invitation_id
+    let existing_guardian = lockbox_shared::models::Guardian {
+        id: String::new(),
+        name: invited_name.to_string(),
+        lead_guardian: false,
+        status: GuardianStatus::Invited,
+        added_at: "2023-01-01T00:00:00Z".to_string(),
+        invitation_id: invitation_id.to_string(),
+    };
+
+    let box_record = lockbox_shared::models::BoxRecord {
+        id: box_id.to_string(),
+        name: "Test Box".to_string(),
+        description: "Test Description".to_string(),
+        is_locked: false,
+        created_at: "2023-01-01T00:00:00Z".to_string(),
+        updated_at: "2023-01-01T00:00:00Z".to_string(),
+        owner_id: "test_owner".to_string(),
+        owner_name: Some("Test Owner".to_string()),
+        documents: vec![],
+        guardians: vec![existing_guardian],
+        unlock_instructions: None,
+        unlock_request: None,
+        version: 0,
+    };
+
+    // Add test box to store
+    let _ = store.create_box(box_record).await.unwrap();
+
+    // Send invitation_created event for the same invitation_id
+    let event = create_test_sns_event_with_name(
+        "invitation_created",
+        invitation_id,
+        box_id,
+        "",
+        Some(invited_name.to_string()),
+    );
+
+    // Call handler - should be idempotent
+    let result = store.handle_event(event).await;
+    assert!(
+        result.is_ok(),
+        "Handler should succeed for duplicate invitation_created event"
+    );
+
+    // Verify no duplicate guardian was created
+    let box_result = store.get_box(box_id).await;
+    assert!(box_result.is_ok());
+
+    let box_record = box_result.unwrap();
+    assert_eq!(
+        box_record.guardians.len(),
+        1,
+        "Should still have exactly one guardian (no duplicate)"
+    );
+
+    let guardian = &box_record.guardians[0];
+    assert_eq!(guardian.invitation_id, invitation_id);
+    assert_eq!(guardian.name, invited_name);
+}
+
+#[tokio::test]
+async fn test_invitation_created_lead_guardian() {
+    // Create test store
+    let store = create_test_store().await;
+
+    // Create test SNS event for invitation_created with lead_guardian=true
+    let box_id = "test_box_lead_guardian";
+    let invitation_id = "test_invitation_lead_guardian";
+    let invited_name = "Lead Guardian";
+    let event = create_test_sns_event_full(
+        "invitation_created",
+        invitation_id,
+        box_id,
+        "", // No user_id for invitation_created events
+        Some(invited_name.to_string()),
+        true, // is_lead_guardian = true
+    );
+
+    // Create a test box record without any guardians initially
+    let box_record = lockbox_shared::models::BoxRecord {
+        id: box_id.to_string(),
+        name: "Test Box".to_string(),
+        description: "Test Description".to_string(),
+        is_locked: false,
+        created_at: "2023-01-01T00:00:00Z".to_string(),
+        updated_at: "2023-01-01T00:00:00Z".to_string(),
+        owner_id: "test_owner".to_string(),
+        owner_name: Some("Test Owner".to_string()),
+        documents: vec![],
+        guardians: vec![], // Start with no guardians
+        unlock_instructions: None,
+        unlock_request: None,
+        version: 0,
+    };
+
+    // Add test box to store
+    let _ = store.create_box(box_record).await.unwrap();
+
+    // Call handler with the appropriate box store
+    let result = store.handle_event(event).await;
+    assert!(result.is_ok(), "Handler failed: {:?}", result.err());
+
+    // Verify guardian was created correctly with lead_guardian=true
+    let box_result = store.get_box(box_id).await;
+    assert!(box_result.is_ok());
+
+    let box_record = box_result.unwrap();
+    assert_eq!(box_record.guardians.len(), 1);
+
+    let guardian = &box_record.guardians[0];
+    assert_eq!(guardian.name, invited_name);
+    assert_eq!(guardian.lead_guardian, true, "Guardian should be marked as lead guardian");
+    assert_eq!(guardian.status, GuardianStatus::Invited);
+    assert_eq!(guardian.invitation_id, invitation_id);
 }
 
 #[tokio::test]

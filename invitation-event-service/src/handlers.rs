@@ -46,7 +46,7 @@ pub async fn handle_invitation_created(
     let guardian = lockbox_shared::models::Guardian {
         id: String::new(), // Empty until invitation is linked to a user
         name: guardian_name,
-        lead_guardian: false,
+        lead_guardian: event.is_lead_guardian,
         status: GuardianStatus::Invited,
         added_at: chrono::Utc::now().to_rfc3339(),
         invitation_id: event.invitation_id.clone(),

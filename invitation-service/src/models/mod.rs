@@ -7,6 +7,8 @@ pub struct CreateInvitationRequest {
     pub invited_name: String,
     #[serde(rename = "boxId")]
     pub box_id: String,
+    #[serde(rename = "isLeadGuardian", default)]
+    pub is_lead_guardian: bool,
 }
 
 #[derive(Deserialize, Debug)]

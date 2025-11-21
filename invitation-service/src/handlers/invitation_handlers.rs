@@ -52,6 +52,7 @@ pub async fn create_invitation<S: InvitationStore + ?Sized>(
         opened: false,
         linked_user_id: None,
         creator_id: user_id,
+        is_lead_guardian: create_request.is_lead_guardian,
     };
 
     // Save to database
@@ -212,6 +213,7 @@ fn build_event_payload(invitation: &Invitation, event_type: &str) -> Result<serd
         "user_id": invitation.linked_user_id,
         "invite_code": invitation.invite_code,
         "invited_name": invitation.invited_name,
+        "is_lead_guardian": invitation.is_lead_guardian,
         "timestamp": Utc::now().to_rfc3339()
     }))
 }

@@ -1003,7 +1003,7 @@ async fn test_update_single_guardian() {
         status: GuardianStatus::Invited,
         added_at: "2023-01-01T12:00:00Z".to_string(),
         invitation_id: "inv-guardian-a".to_string(),
-        lock_data_received_at: None,
+        locked_box_viewed_at: None,
     };
 
     box_record.guardians.push(guardian_record);
@@ -1111,7 +1111,7 @@ async fn test_delete_guardian_success() {
         status: GuardianStatus::Accepted,
         added_at: now_str(),
         invitation_id: "inv-delete".into(),
-                lock_data_received_at: None,
+                locked_box_viewed_at: None,
     };
 
     upsert_guardians(&store, "box_1", vec![guardian.clone()]).await;
@@ -1154,7 +1154,7 @@ async fn test_delete_guardian_unauthorized() {
         status: GuardianStatus::Accepted,
         added_at: now_str(),
         invitation_id: "inv-delete".into(),
-                lock_data_received_at: None,
+                locked_box_viewed_at: None,
     };
 
     upsert_guardians(&store, "box_1", vec![guardian]).await;

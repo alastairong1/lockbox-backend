@@ -31,7 +31,6 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
         name: "Guardian Test Box 1".into(),
         description: "Box for guardian tests".into(),
         is_locked: true,
-        locked_at: Some(now.to_string()),
         created_at: now.to_string(),
         updated_at: now.to_string(),
         owner_id: "owner_1".into(),
@@ -45,7 +44,6 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
                 status: GuardianStatus::Accepted,
                 added_at: now.to_string(),
                 invitation_id: "invitation_1".into(),
-                lock_data_received_at: None,
             },
             Guardian {
                 id: "guardian_2".into(),
@@ -54,7 +52,6 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
                 status: GuardianStatus::Accepted,
                 added_at: now.to_string(),
                 invitation_id: "invitation_2".into(),
-                lock_data_received_at: None,
             },
             Guardian {
                 id: "lead_guardian_1".into(),
@@ -63,7 +60,6 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
                 status: GuardianStatus::Accepted,
                 added_at: now.to_string(),
                 invitation_id: "invitation_3".into(),
-                lock_data_received_at: None,
             },
         ],
         unlock_instructions: Some("Contact all guardians".into()),
@@ -88,7 +84,6 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
         name: "Guardian Test Box 2".into(),
         description: "Box with unlock request".into(),
         is_locked: true,
-        locked_at: Some(now.to_string()),
         created_at: now.to_string(),
         updated_at: now.to_string(),
         owner_id: "owner_1".into(),
@@ -102,7 +97,6 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
                 status: GuardianStatus::Accepted,
                 added_at: now.to_string(),
                 invitation_id: "invitation_5".into(),
-                lock_data_received_at: None,
             },
             Guardian {
                 id: "guardian_3".into(),
@@ -111,7 +105,6 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
                 status: GuardianStatus::Accepted,
                 added_at: now.to_string(),
                 invitation_id: "invitation_6".into(),
-                lock_data_received_at: None,
             },
             Guardian {
                 id: "lead_guardian_1".into(),
@@ -120,7 +113,6 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
                 status: GuardianStatus::Accepted,
                 added_at: now.to_string(),
                 invitation_id: "invitation_7".into(),
-                lock_data_received_at: None,
             },
         ],
         unlock_instructions: Some("Call emergency contact".into()),
@@ -135,7 +127,6 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
         name: "Guardian Test Box 3".into(),
         description: "Box without guardian_1".into(),
         is_locked: true,
-        locked_at: Some(now.to_string()),
         created_at: now.to_string(),
         updated_at: now.to_string(),
         owner_id: "owner_2".into(),
@@ -148,7 +139,6 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
             status: GuardianStatus::Accepted,
             added_at: now.to_string(),
             invitation_id: "invitation_9".into(),
-                lock_data_received_at: None,
         }],
         unlock_instructions: None,
         unlock_request: None,
@@ -804,7 +794,6 @@ async fn test_accept_guardian_invitation() {
         status: GuardianStatus::Invited,
         added_at: now_str(),
         invitation_id: "inv-pending".into(),
-                lock_data_received_at: None,
     };
 
     replace_guardian(
@@ -860,7 +849,6 @@ async fn test_reject_guardian_invitation() {
         status: GuardianStatus::Invited,
         added_at: now_str(),
         invitation_id: "inv-pending".into(),
-                lock_data_received_at: None,
     };
 
     replace_guardian(
@@ -916,7 +904,6 @@ async fn test_guardian_invitation_without_pending_status() {
         status: GuardianStatus::Accepted,
         added_at: now_str(),
         invitation_id: "inv-accepted".into(),
-                lock_data_received_at: None,
     };
 
     replace_guardian(

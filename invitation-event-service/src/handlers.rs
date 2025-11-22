@@ -58,6 +58,10 @@ pub async fn handle_invitation_created(
         status: GuardianStatus::Invited,
         added_at: chrono::Utc::now().to_rfc3339(),
         invitation_id: event.invitation_id.clone(),
+        lock_data_received_at: None,
+        encrypted_shard: None,
+        shard_hash: None,
+        shard_fetched_at: None,
     };
 
     // Add guardian to box

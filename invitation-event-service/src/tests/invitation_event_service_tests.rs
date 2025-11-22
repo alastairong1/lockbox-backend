@@ -205,6 +205,7 @@ async fn test_invitation_created_handler() {
         name: "Test Box".to_string(),
         description: "Test Description".to_string(),
         is_locked: false,
+        locked_at: None,
         created_at: "2023-01-01T00:00:00Z".to_string(),
         updated_at: "2023-01-01T00:00:00Z".to_string(),
         owner_id: "test_owner".to_string(),
@@ -213,6 +214,10 @@ async fn test_invitation_created_handler() {
         guardians: vec![], // Start with no guardians
         unlock_instructions: None,
         unlock_request: None,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
         version: 0,
     };
 
@@ -291,6 +296,7 @@ async fn test_invitation_created_handler_without_name() {
         name: "Test Box".to_string(),
         description: "Test Description".to_string(),
         is_locked: false,
+        locked_at: None,
         created_at: "2023-01-01T00:00:00Z".to_string(),
         updated_at: "2023-01-01T00:00:00Z".to_string(),
         owner_id: "test_owner".to_string(),
@@ -299,6 +305,10 @@ async fn test_invitation_created_handler_without_name() {
         guardians: vec![], // Start with no guardians
         unlock_instructions: None,
         unlock_request: None,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
         version: 0,
     };
 
@@ -344,6 +354,10 @@ async fn test_invitation_created_idempotency() {
         status: GuardianStatus::Invited,
         added_at: "2023-01-01T00:00:00Z".to_string(),
         invitation_id: invitation_id.to_string(),
+        lock_data_received_at: None,
+        encrypted_shard: None,
+        shard_hash: None,
+        shard_fetched_at: None,
     };
 
     let box_record = lockbox_shared::models::BoxRecord {
@@ -351,6 +365,7 @@ async fn test_invitation_created_idempotency() {
         name: "Test Box".to_string(),
         description: "Test Description".to_string(),
         is_locked: false,
+        locked_at: None,
         created_at: "2023-01-01T00:00:00Z".to_string(),
         updated_at: "2023-01-01T00:00:00Z".to_string(),
         owner_id: "test_owner".to_string(),
@@ -359,6 +374,10 @@ async fn test_invitation_created_idempotency() {
         guardians: vec![existing_guardian],
         unlock_instructions: None,
         unlock_request: None,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
         version: 0,
     };
 
@@ -421,6 +440,7 @@ async fn test_invitation_created_lead_guardian() {
         name: "Test Box".to_string(),
         description: "Test Description".to_string(),
         is_locked: false,
+        locked_at: None,
         created_at: "2023-01-01T00:00:00Z".to_string(),
         updated_at: "2023-01-01T00:00:00Z".to_string(),
         owner_id: "test_owner".to_string(),
@@ -429,6 +449,10 @@ async fn test_invitation_created_lead_guardian() {
         guardians: vec![], // Start with no guardians
         unlock_instructions: None,
         unlock_request: None,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
         version: 0,
     };
 
@@ -473,6 +497,7 @@ async fn test_invitation_viewed_handler() {
         name: "Test Box".to_string(),
         description: "Test Description".to_string(),
         is_locked: false,
+        locked_at: None,
         created_at: "2023-01-01T00:00:00Z".to_string(),
         updated_at: "2023-01-01T00:00:00Z".to_string(),
         owner_id: "test_owner".to_string(),
@@ -481,6 +506,10 @@ async fn test_invitation_viewed_handler() {
         guardians: vec![],
         unlock_instructions: None,
         unlock_request: None,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
         version: 0,
     };
 
@@ -493,6 +522,10 @@ async fn test_invitation_viewed_handler() {
         status: GuardianStatus::Invited,
         added_at: "2023-01-01T00:00:00Z".to_string(),
         invitation_id: invitation_id.to_string(), // Use the same invitation_id as in the event
+        lock_data_received_at: None,
+        encrypted_shard: None,
+        shard_hash: None,
+        shard_fetched_at: None,
     };
 
     box_record.guardians.push(guardian);
@@ -552,6 +585,7 @@ async fn test_no_matching_guardian() {
         name: "Test Box".to_string(),
         description: "Test Description".to_string(),
         is_locked: false,
+        locked_at: None,
         created_at: "2023-01-01T00:00:00Z".to_string(),
         updated_at: "2023-01-01T00:00:00Z".to_string(),
         owner_id: "test_owner".to_string(),
@@ -564,9 +598,17 @@ async fn test_no_matching_guardian() {
             status: GuardianStatus::Invited,
             added_at: "2023-01-01T00:00:00Z".to_string(),
             invitation_id: "different_invitation_id".to_string(),
+            lock_data_received_at: None,
+            encrypted_shard: None,
+            shard_hash: None,
+            shard_fetched_at: None,
         }],
         unlock_instructions: None,
         unlock_request: None,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
         version: 0,
     };
 
@@ -621,6 +663,7 @@ async fn test_concurrent_updates() {
         name: "Concurrent Test Box".to_string(),
         description: "Test Description".to_string(),
         is_locked: false,
+        locked_at: None,
         created_at: "2023-01-01T00:00:00Z".to_string(),
         updated_at: "2023-01-01T00:00:00Z".to_string(),
         owner_id: "test_owner".to_string(),
@@ -629,6 +672,10 @@ async fn test_concurrent_updates() {
         guardians: vec![],
         unlock_instructions: None,
         unlock_request: None,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
         version: 0,
     };
 
@@ -640,6 +687,10 @@ async fn test_concurrent_updates() {
         status: GuardianStatus::Invited,
         added_at: "2023-01-01T00:00:00Z".to_string(),
         invitation_id: invitation_id1.to_string(),
+        lock_data_received_at: None,
+        encrypted_shard: None,
+        shard_hash: None,
+        shard_fetched_at: None,
     };
 
     let guardian2 = lockbox_shared::models::Guardian {
@@ -649,6 +700,10 @@ async fn test_concurrent_updates() {
         status: GuardianStatus::Invited,
         added_at: "2023-01-01T00:00:00Z".to_string(),
         invitation_id: invitation_id2.to_string(),
+        lock_data_received_at: None,
+        encrypted_shard: None,
+        shard_hash: None,
+        shard_fetched_at: None,
     };
 
     let guardian3 = lockbox_shared::models::Guardian {
@@ -658,6 +713,10 @@ async fn test_concurrent_updates() {
         status: GuardianStatus::Invited,
         added_at: "2023-01-01T00:00:00Z".to_string(),
         invitation_id: invitation_id3.to_string(),
+        lock_data_received_at: None,
+        encrypted_shard: None,
+        shard_hash: None,
+        shard_fetched_at: None,
     };
 
     box_record.guardians.push(guardian1);
@@ -746,6 +805,7 @@ async fn test_malformed_event() {
         name: "Test Box".to_string(),
         description: "Test Description".to_string(),
         is_locked: false,
+        locked_at: None,
         created_at: "2023-01-01T00:00:00Z".to_string(),
         updated_at: "2023-01-01T00:00:00Z".to_string(),
         owner_id: "test_owner".to_string(),
@@ -758,9 +818,17 @@ async fn test_malformed_event() {
             status: GuardianStatus::Invited,
             added_at: "2023-01-01T00:00:00Z".to_string(),
             invitation_id: invitation_id.to_string(),
+            lock_data_received_at: None,
+            encrypted_shard: None,
+            shard_hash: None,
+            shard_fetched_at: None,
         }],
         unlock_instructions: None,
         unlock_request: None,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
         version: 0,
     };
 

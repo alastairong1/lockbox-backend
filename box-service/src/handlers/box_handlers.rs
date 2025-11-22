@@ -14,7 +14,7 @@ use lockbox_shared::models::{now_str, BoxRecord, Document, Guardian};
 // Import request/response types from local models
 use crate::models::{
     BoxResponse, CreateBoxRequest, DocumentUpdateRequest, DocumentUpdateResponse,
-    GuardianUpdateRequest, GuardianUpdateResponse, OptionalField, UpdateBoxRequest,
+    GuardianUpdateRequest, GuardianUpdateResponse, LockBoxRequest, OptionalField, UpdateBoxRequest,
 };
 
 // GET /boxes
@@ -33,6 +33,121 @@ where
     Ok(Json(serde_json::json!({ "boxes": my_boxes })))
 }
 
+// GET /boxes/guardian/:id/shard
+pub async fn fetch_guardian_shard<S>(
+    State(store): State<Arc<S>>,
+    Path(id): Path<String>,
+    Extension(user_id): Extension<String>,
+) -> Result<Json<serde_json::Value>>
+where
+    S: BoxStore,
+{
+    let mut box_rec = store.get_box(&id).await?;
+
+    if !box_rec.is_locked {
+        return Err(AppError::bad_request(
+            "Shard fetch is only available for locked boxes.".into(),
+        ));
+    }
+
+    let guardian_index = box_rec
+        .guardians
+        .iter()
+        .position(|g| g.id == user_id)
+        .ok_or_else(|| AppError::unauthorized("You are not a guardian for this box.".into()))?;
+
+    let total_shards = box_rec.guardians.len();
+    let shard_threshold = box_rec
+        .shard_threshold
+        .unwrap_or_else(|| total_shards as u32);
+
+    let guardian = &mut box_rec.guardians[guardian_index];
+
+    if guardian.encrypted_shard.is_none() {
+        return Err(AppError::bad_request(
+            "Shard already fetched and removed from server storage.".into(),
+        ));
+    }
+
+    let shard = guardian
+        .encrypted_shard
+        .clone()
+        .ok_or_else(|| AppError::not_found("Shard not available for this guardian.".into()))?;
+    let shard_hash = guardian.shard_hash.clone();
+
+    Ok(Json(serde_json::json!({
+        "encryptedShard": shard,
+        "shardHash": shard_hash,
+        "shardFetchedAt": guardian.shard_fetched_at,
+        "shardThreshold": shard_threshold,
+        "totalShards": total_shards
+    })))
+}
+
+// PATCH /boxes/guardian/:id/shard/ack
+pub async fn acknowledge_guardian_shard<S>(
+    State(store): State<Arc<S>>,
+    Path(id): Path<String>,
+    Extension(user_id): Extension<String>,
+) -> Result<Json<serde_json::Value>>
+where
+    S: BoxStore,
+{
+    let mut box_rec = store.get_box(&id).await?;
+
+    if !box_rec.is_locked {
+        return Err(AppError::bad_request(
+            "Shard acknowledgement is only available for locked boxes.".into(),
+        ));
+    }
+
+    let guardian_index = box_rec
+        .guardians
+        .iter()
+        .position(|g| g.id == user_id)
+        .ok_or_else(|| AppError::unauthorized("You are not a guardian for this box.".into()))?;
+
+    let total_shards = box_rec.guardians.len();
+
+    let guardian = &mut box_rec.guardians[guardian_index];
+
+    if guardian.shard_fetched_at.is_some() && guardian.encrypted_shard.is_none() {
+        return Ok(Json(serde_json::json!({
+            "shardFetchedAt": guardian.shard_fetched_at.clone(),
+            "totalShards": total_shards,
+            "shardsFetched": box_rec.shards_fetched.unwrap_or(0),
+        })));
+    }
+
+    if guardian.encrypted_shard.is_none() {
+        return Err(AppError::bad_request(
+            "Shard not available to acknowledge.".into(),
+        ));
+    }
+
+    let fetched_at = now_str();
+    guardian.shard_fetched_at = Some(fetched_at.clone());
+    guardian.encrypted_shard = None;
+
+    let fetched_count = box_rec
+        .guardians
+        .iter()
+        .filter(|g| g.shard_fetched_at.is_some())
+        .count();
+    box_rec.shards_fetched = Some(fetched_count);
+    box_rec.total_shards = Some(total_shards);
+    if fetched_count == total_shards {
+        box_rec.shards_deleted_at = Some(now_str());
+    }
+
+    let _ = store.update_box(box_rec).await?;
+
+    Ok(Json(serde_json::json!({
+        "shardFetchedAt": fetched_at,
+        "totalShards": total_shards,
+        "shardsFetched": fetched_count
+    })))
+}
 // GET /boxes/:id
 pub async fn get_box<S>(
     State(store): State<Arc<S>>,
@@ -83,6 +198,10 @@ where
         unlock_instructions: None,
         unlock_request: None,
         version: 0,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
     };
 
     // Create the box in store
@@ -144,6 +263,13 @@ where
     }
 
     if let Some(is_locked) = payload.is_locked {
+        // Prevent unlocking a locked box
+        if box_rec.is_locked && !is_locked {
+            return Err(AppError::bad_request(
+                "Cannot unlock a locked box. Locked boxes are immutable.".into(),
+            ));
+        }
+
         // If locking the box for the first time, set locked_at timestamp
         if is_locked && !box_rec.is_locked {
             box_rec.locked_at = Some(now_str());
@@ -152,6 +278,71 @@ where
     }
 
     // Save the updated box
+    let updated_box = store.update_box(box_rec).await?;
+
+    Ok(Json(
+        serde_json::json!({ "box": BoxResponse::from(updated_box) }),
+    ))
+}
+
+// POST /boxes/owned/:id/lock
+pub async fn lock_box<S>(
+    State(store): State<Arc<S>>,
+    Path(id): Path<String>,
+    Extension(user_id): Extension<String>,
+    Json(payload): Json<LockBoxRequest>,
+) -> Result<Json<serde_json::Value>>
+where
+    S: BoxStore,
+{
+    let mut box_rec = store.get_box(&id).await?;
+
+    if box_rec.owner_id != user_id {
+        return Err(AppError::unauthorized(
+            "You don't have permission to lock this box".into(),
+        ));
+    }
+
+    if box_rec.is_locked {
+        return Err(AppError::bad_request(
+            "Cannot lock an already locked box.".into(),
+        ));
+    }
+
+    if payload.shards.len() != box_rec.guardians.len() {
+        return Err(AppError::bad_request(
+            "Shard count must match the number of guardians.".into(),
+        ));
+    }
+
+    if payload.shard_threshold < 1 || payload.shard_threshold > payload.shards.len() {
+        return Err(AppError::bad_request(
+            "Shard threshold must be between 1 and the number of guardians.".into(),
+        ));
+    }
+
+    for guardian in box_rec.guardians.iter_mut() {
+        if let Some(shard) = payload.shards.iter().find(|s| s.guardian_id == guardian.id) {
+            guardian.encrypted_shard = Some(shard.shard.clone());
+            guardian.shard_hash = Some(shard.shard_hash.clone());
+            guardian.shard_fetched_at = None;
+        } else {
+            return Err(AppError::bad_request(format!(
+                "Missing shard for guardian {}",
+                guardian.id
+            )));
+        }
+    }
+
+    let now = now_str();
+    box_rec.is_locked = true;
+    box_rec.locked_at = Some(now.clone());
+    box_rec.updated_at = now;
+    box_rec.shard_threshold = Some(payload.shard_threshold as u32);
+    box_rec.total_shards = Some(payload.shards.len());
+    box_rec.shards_fetched = Some(0);
+    box_rec.shards_deleted_at = None;
+
     let updated_box = store.update_box(box_rec).await?;
 
     Ok(Json(

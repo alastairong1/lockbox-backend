@@ -1,7 +1,7 @@
 use axum::{
     extract::Request,
     middleware,
-    routing::{get, patch},
+    routing::{get, patch, post},
     Router,
 };
 use log::{info, warn};
@@ -10,8 +10,9 @@ use tower_http::cors::{Any, CorsLayer};
 
 use crate::handlers::{
     box_handlers::{
-        create_box, delete_box, delete_document, delete_guardian, get_box, get_boxes, update_box,
-        update_document, update_guardian,
+        acknowledge_guardian_shard, create_box, delete_box, delete_document, delete_guardian,
+        fetch_guardian_shard, get_box, get_boxes, lock_box, update_box, update_document,
+        update_guardian,
     },
     guardian_handlers::{
         get_guardian_box, get_guardian_boxes, request_unlock, respond_to_invitation,
@@ -77,6 +78,7 @@ where
             "/boxes/owned/:id",
             get(get_box).patch(update_box).delete(delete_box),
         )
+        .route("/boxes/owned/:id/lock", post(lock_box))
         .route("/boxes/owned/:id/guardian", patch(update_guardian))
         .route(
             "/boxes/owned/:id/guardian/:guardian_id",
@@ -89,6 +91,11 @@ where
         )
         .route("/boxes/guardian", get(get_guardian_boxes))
         .route("/boxes/guardian/:id", get(get_guardian_box))
+        .route("/boxes/guardian/:id/shard", get(fetch_guardian_shard))
+        .route(
+            "/boxes/guardian/:id/shard/ack",
+            patch(acknowledge_guardian_shard),
+        )
         .route("/boxes/guardian/:id/request", patch(request_unlock))
         .route(
             "/boxes/guardian/:id/respond",

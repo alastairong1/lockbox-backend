@@ -23,6 +23,7 @@ async fn test_mock_box_store() {
         name: "Test Box".to_string(),
         description: "Test Description".to_string(),
         is_locked: false,
+        locked_at: None,
         created_at: now.clone(),
         updated_at: now.clone(),
         owner_id: owner_id.to_string(),
@@ -32,6 +33,10 @@ async fn test_mock_box_store() {
         unlock_instructions: None,
         unlock_request: None,
         version: 0,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
     };
 
     // Store the box

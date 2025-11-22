@@ -15,6 +15,7 @@ mod dynamo_tests {
             name: name.to_string(),
             description: "Test box description".to_string(),
             is_locked: false,
+            locked_at: None,
             created_at: now.clone(),
             updated_at: now,
             owner_id: owner_id.to_string(),
@@ -24,6 +25,10 @@ mod dynamo_tests {
             unlock_instructions: None,
             unlock_request: None,
             version: 0,
+            shard_threshold: None,
+            shards_fetched: None,
+            total_shards: None,
+            shards_deleted_at: None,
         }
     }
 
@@ -381,6 +386,10 @@ mod dynamo_tests {
             lead_guardian: false,
             added_at: crate::models::now_str(),
             invitation_id: Uuid::new_v4().to_string(),
+            lock_data_received_at: None,
+            encrypted_shard: None,
+            shard_hash: None,
+            shard_fetched_at: None,
         });
 
         // Box 2 - has test_guardian as a rejected guardian (shouldn't show up)
@@ -392,6 +401,10 @@ mod dynamo_tests {
             lead_guardian: false,
             added_at: crate::models::now_str(),
             invitation_id: Uuid::new_v4().to_string(),
+            lock_data_received_at: None,
+            encrypted_shard: None,
+            shard_hash: None,
+            shard_fetched_at: None,
         });
 
         // Box 3 - different guardian
@@ -403,6 +416,10 @@ mod dynamo_tests {
             lead_guardian: false,
             added_at: crate::models::now_str(),
             invitation_id: Uuid::new_v4().to_string(),
+            lock_data_received_at: None,
+            encrypted_shard: None,
+            shard_hash: None,
+            shard_fetched_at: None,
         });
 
         store.create_box(test_box1.clone()).await.unwrap();

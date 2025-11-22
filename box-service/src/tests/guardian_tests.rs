@@ -46,6 +46,9 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
                 added_at: now.to_string(),
                 invitation_id: "invitation_1".into(),
                 lock_data_received_at: None,
+                encrypted_shard: None,
+                shard_hash: None,
+                shard_fetched_at: None,
             },
             Guardian {
                 id: "guardian_2".into(),
@@ -55,6 +58,9 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
                 added_at: now.to_string(),
                 invitation_id: "invitation_2".into(),
                 lock_data_received_at: None,
+                encrypted_shard: None,
+                shard_hash: None,
+                shard_fetched_at: None,
             },
             Guardian {
                 id: "lead_guardian_1".into(),
@@ -64,11 +70,18 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
                 added_at: now.to_string(),
                 invitation_id: "invitation_3".into(),
                 lock_data_received_at: None,
+                encrypted_shard: None,
+                shard_hash: None,
+                shard_fetched_at: None,
             },
         ],
         unlock_instructions: Some("Contact all guardians".into()),
         unlock_request: None,
         version: 0,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
     };
 
     // Box 2: With pending unlock request
@@ -103,6 +116,9 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
                 added_at: now.to_string(),
                 invitation_id: "invitation_5".into(),
                 lock_data_received_at: None,
+                encrypted_shard: None,
+                shard_hash: None,
+                shard_fetched_at: None,
             },
             Guardian {
                 id: "guardian_3".into(),
@@ -112,6 +128,9 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
                 added_at: now.to_string(),
                 invitation_id: "invitation_6".into(),
                 lock_data_received_at: None,
+                encrypted_shard: None,
+                shard_hash: None,
+                shard_fetched_at: None,
             },
             Guardian {
                 id: "lead_guardian_1".into(),
@@ -121,11 +140,18 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
                 added_at: now.to_string(),
                 invitation_id: "invitation_7".into(),
                 lock_data_received_at: None,
+                encrypted_shard: None,
+                shard_hash: None,
+                shard_fetched_at: None,
             },
         ],
         unlock_instructions: Some("Call emergency contact".into()),
         unlock_request: Some(unlock_request),
         version: 0,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
     };
 
     // Box 3: Not associated with guardian_1
@@ -148,11 +174,18 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
             status: GuardianStatus::Accepted,
             added_at: now.to_string(),
             invitation_id: "invitation_9".into(),
-                lock_data_received_at: None,
+            lock_data_received_at: None,
+            encrypted_shard: None,
+            shard_hash: None,
+            shard_fetched_at: None,
         }],
         unlock_instructions: None,
         unlock_request: None,
         version: 0,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
     };
 
     vec![box_1, box_2, box_3]
@@ -804,7 +837,10 @@ async fn test_accept_guardian_invitation() {
         status: GuardianStatus::Invited,
         added_at: now_str(),
         invitation_id: "inv-pending".into(),
-                lock_data_received_at: None,
+        lock_data_received_at: None,
+        encrypted_shard: None,
+        shard_hash: None,
+        shard_fetched_at: None,
     };
 
     replace_guardian(
@@ -860,7 +896,10 @@ async fn test_reject_guardian_invitation() {
         status: GuardianStatus::Invited,
         added_at: now_str(),
         invitation_id: "inv-pending".into(),
-                lock_data_received_at: None,
+        lock_data_received_at: None,
+        encrypted_shard: None,
+        shard_hash: None,
+        shard_fetched_at: None,
     };
 
     replace_guardian(
@@ -916,7 +955,10 @@ async fn test_guardian_invitation_without_pending_status() {
         status: GuardianStatus::Accepted,
         added_at: now_str(),
         invitation_id: "inv-accepted".into(),
-                lock_data_received_at: None,
+        lock_data_received_at: None,
+        encrypted_shard: None,
+        shard_hash: None,
+        shard_fetched_at: None,
     };
 
     replace_guardian(

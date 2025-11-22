@@ -159,8 +159,26 @@ pub struct Guardian {
     pub added_at: String,
     #[serde(rename = "invitationId")]
     pub invitation_id: String,
-    #[serde(rename = "lockDataReceivedAt", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "lockDataReceivedAt",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub lock_data_received_at: Option<String>,
+    #[serde(
+        rename = "encryptedShard",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub encrypted_shard: Option<String>,
+    #[serde(rename = "shardHash", skip_serializing_if = "Option::is_none", default)]
+    pub shard_hash: Option<String>,
+    #[serde(
+        rename = "shardFetchedAt",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub shard_fetched_at: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -203,6 +221,30 @@ pub struct BoxRecord {
     pub unlock_request: Option<UnlockRequest>,
     #[serde(default)]
     pub version: u64, // Version for optimistic concurrency control
+    #[serde(
+        rename = "shardThreshold",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub shard_threshold: Option<u32>,
+    #[serde(
+        rename = "shardsFetched",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub shards_fetched: Option<usize>,
+    #[serde(
+        rename = "totalShards",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub total_shards: Option<usize>,
+    #[serde(
+        rename = "shardsDeletedAt",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub shards_deleted_at: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

@@ -16,6 +16,8 @@ use serde_json::json;
 use std::sync::Arc;
 use tower::ServiceExt;
 
+use crate::handlers::box_handlers::{acknowledge_guardian_shard, fetch_guardian_shard, lock_box};
+use crate::models::LockBoxRequest;
 use crate::routes;
 use lockbox_shared::models::{now_str, BoxRecord, Guardian, GuardianStatus};
 
@@ -119,6 +121,10 @@ fn create_test_boxes(now: &str) -> Vec<BoxRecord> {
         unlock_instructions: None,
         unlock_request: None,
         version: 0,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
     };
 
     let box_2 = BoxRecord {
@@ -136,12 +142,145 @@ fn create_test_boxes(now: &str) -> Vec<BoxRecord> {
         unlock_instructions: None,
         unlock_request: None,
         version: 0,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
     };
 
     boxes.push(box_1);
     boxes.push(box_2);
 
     boxes
+}
+
+#[tokio::test]
+async fn test_lock_and_acknowledge_shards_with_mock_store() {
+    let store = Arc::new(MockBoxStore::new());
+    let now = now_str();
+
+    // Seed box with two guardians
+    let box_id = "box_shards";
+    let owner_id = "owner_shards";
+    let g1 = Guardian {
+        id: "g1".into(),
+        name: "G One".into(),
+        lead_guardian: false,
+        status: GuardianStatus::Accepted,
+        added_at: now.clone(),
+        invitation_id: "inv1".into(),
+        lock_data_received_at: None,
+        encrypted_shard: None,
+        shard_hash: None,
+        shard_fetched_at: None,
+    };
+    let g2 = Guardian {
+        id: "g2".into(),
+        name: "G Two".into(),
+        lead_guardian: false,
+        status: GuardianStatus::Accepted,
+        added_at: now.clone(),
+        invitation_id: "inv2".into(),
+        lock_data_received_at: None,
+        encrypted_shard: None,
+        shard_hash: None,
+        shard_fetched_at: None,
+    };
+
+    let box_record = BoxRecord {
+        id: box_id.into(),
+        name: "Shard Box".into(),
+        description: "Shard test".into(),
+        is_locked: false,
+        locked_at: None,
+        created_at: now.clone(),
+        updated_at: now.clone(),
+        owner_id: owner_id.into(),
+        owner_name: Some("Owner".into()),
+        documents: vec![],
+        guardians: vec![g1.clone(), g2.clone()],
+        unlock_instructions: None,
+        unlock_request: None,
+        version: 0,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
+    };
+
+    store.create_box(box_record).await.unwrap();
+
+    // Lock the box with 2-of-2 shards
+    let lock_payload = LockBoxRequest {
+        shard_threshold: 2,
+        shards: vec![
+            crate::models::IncomingShard {
+                guardian_id: g1.id.clone(),
+                shard: "shard-g1".into(),
+                shard_hash: "hash-g1".into(),
+            },
+            crate::models::IncomingShard {
+                guardian_id: g2.id.clone(),
+                shard: "shard-g2".into(),
+                shard_hash: "hash-g2".into(),
+            },
+        ],
+    };
+
+    let _ = lock_box(
+        axum::extract::State(store.clone()),
+        axum::extract::Path(box_id.to_string()),
+        axum::Extension(owner_id.to_string()),
+        axum::Json(lock_payload),
+    )
+    .await
+    .expect("lock should succeed");
+
+    let locked_box = store.get_box(box_id).await.unwrap();
+    assert!(locked_box.is_locked);
+    assert_eq!(locked_box.shard_threshold, Some(2));
+    assert_eq!(locked_box.total_shards, Some(2));
+
+    // Guardian fetch (no delete yet)
+    let shard_resp = fetch_guardian_shard(
+        axum::extract::State(store.clone()),
+        axum::extract::Path(box_id.to_string()),
+        axum::Extension(g1.id.clone()),
+    )
+    .await
+    .expect("fetch shard succeeds");
+    let shard_json = shard_resp.0;
+    assert_eq!(shard_json["encryptedShard"], "shard-g1");
+
+    // Ack shard, should delete server copy for g1
+    let ack_resp = acknowledge_guardian_shard(
+        axum::extract::State(store.clone()),
+        axum::extract::Path(box_id.to_string()),
+        axum::Extension(g1.id.clone()),
+    )
+    .await
+    .expect("ack succeed");
+    let ack_json = ack_resp.0;
+    assert!(ack_json["shardFetchedAt"].is_string());
+
+    let after_ack = store.get_box(box_id).await.unwrap();
+    assert_eq!(after_ack.shards_fetched, Some(1));
+    let g1_after = after_ack.guardians.iter().find(|g| g.id == g1.id).unwrap();
+    assert!(g1_after.encrypted_shard.is_none());
+    assert!(g1_after.shard_fetched_at.is_some());
+
+    // Second guardian ack triggers cleanup marker
+    let _ = acknowledge_guardian_shard(
+        axum::extract::State(store.clone()),
+        axum::extract::Path(box_id.to_string()),
+        axum::Extension(g2.id.clone()),
+    )
+    .await
+    .expect("ack succeed");
+
+    let after_all = store.get_box(box_id).await.unwrap();
+    assert_eq!(after_all.shards_fetched, Some(2));
+    assert!(after_all.shards_deleted_at.is_some());
 }
 
 async fn upsert_guardians(store: &TestStore, box_id: &str, guardians: Vec<Guardian>) {
@@ -1004,6 +1143,9 @@ async fn test_update_single_guardian() {
         added_at: "2023-01-01T12:00:00Z".to_string(),
         invitation_id: "inv-guardian-a".to_string(),
         lock_data_received_at: None,
+        encrypted_shard: None,
+        shard_hash: None,
+        shard_fetched_at: None,
     };
 
     box_record.guardians.push(guardian_record);
@@ -1111,7 +1253,10 @@ async fn test_delete_guardian_success() {
         status: GuardianStatus::Accepted,
         added_at: now_str(),
         invitation_id: "inv-delete".into(),
-                lock_data_received_at: None,
+        lock_data_received_at: None,
+        encrypted_shard: None,
+        shard_hash: None,
+        shard_fetched_at: None,
     };
 
     upsert_guardians(&store, "box_1", vec![guardian.clone()]).await;
@@ -1154,7 +1299,10 @@ async fn test_delete_guardian_unauthorized() {
         status: GuardianStatus::Accepted,
         added_at: now_str(),
         invitation_id: "inv-delete".into(),
-                lock_data_received_at: None,
+        lock_data_received_at: None,
+        encrypted_shard: None,
+        shard_hash: None,
+        shard_fetched_at: None,
     };
 
     upsert_guardians(&store, "box_1", vec![guardian]).await;
@@ -1547,14 +1695,60 @@ async fn test_get_box_by_id() {
 }
 
 #[tokio::test]
-async fn test_locked_box_cannot_update_fields() {
+async fn test_locked_box_is_completely_immutable() {
     // Setup with mock data
     let (app, store) = create_test_app().await;
     add_test_data_to_store(&store).await;
 
     let box_id = "box_1";
 
-    // First, lock the box
+    // First, add a document and guardian to test deletion later
+    let doc_payload = json!({
+        "document": {
+            "id": "test_doc_for_deletion",
+            "title": "Test Document",
+            "encryptedContent": "test content",
+            "createdAt": "2024-01-01T00:00:00Z"
+        }
+    });
+
+    app.clone()
+        .oneshot(create_test_request(
+            "PATCH",
+            &format!("/boxes/owned/{}/document", box_id),
+            "user_1",
+            Some(doc_payload),
+        ))
+        .await
+        .unwrap();
+
+    let guardian_payload = json!({
+        "guardian": {
+            "id": "test_guardian_for_deletion",
+            "name": "Test Guardian",
+            "leadGuardian": false,
+            "status": "invited",
+            "addedAt": "2024-01-01T00:00:00Z",
+            "invitationId": "inv-test-del"
+        }
+    });
+
+    app.clone()
+        .oneshot(create_test_request(
+            "PATCH",
+            &format!("/boxes/owned/{}/guardian", box_id),
+            "user_1",
+            Some(guardian_payload),
+        ))
+        .await
+        .unwrap();
+
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
+
+    // Now lock the box
     let lock_response = app
         .clone()
         .oneshot(create_test_request(
@@ -1572,7 +1766,7 @@ async fn test_locked_box_cannot_update_fields() {
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
     }
 
-    // Try to update name - should fail
+    // Test 1: Cannot update name
     let response = app
         .clone()
         .oneshot(create_test_request(
@@ -1584,39 +1778,44 @@ async fn test_locked_box_cannot_update_fields() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-}
+    let error_body = response_to_json(response).await;
+    assert!(error_body["error"].as_str().unwrap().contains("immutable"));
 
-#[tokio::test]
-async fn test_locked_box_cannot_add_documents() {
-    // Setup with mock data
-    let (app, store) = create_test_app().await;
-    add_test_data_to_store(&store).await;
-
-    let box_id = "box_1";
-
-    // First, lock the box
-    let lock_response = app
+    // Test 2: Cannot update description
+    let response = app
         .clone()
         .oneshot(create_test_request(
             "PATCH",
             &format!("/boxes/owned/{}", box_id),
             "user_1",
-            Some(json!({"isLocked": true})),
+            Some(json!({"description": "New Description"})),
         ))
         .await
         .unwrap();
-    assert_eq!(lock_response.status(), StatusCode::OK);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let error_body = response_to_json(response).await;
+    assert!(error_body["error"].as_str().unwrap().contains("immutable"));
 
-    // Add delay for DynamoDB consistency
-    if matches!(store, TestStore::DynamoDB(_)) {
-        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-    }
+    // Test 3: Cannot update unlock instructions
+    let response = app
+        .clone()
+        .oneshot(create_test_request(
+            "PATCH",
+            &format!("/boxes/owned/{}", box_id),
+            "user_1",
+            Some(json!({"unlockInstructions": "New Instructions"})),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let error_body = response_to_json(response).await;
+    assert!(error_body["error"].as_str().unwrap().contains("immutable"));
 
-    // Try to add a document - should fail
-    let doc_payload = json!({
+    // Test 4: Cannot add new document
+    let new_doc_payload = json!({
         "document": {
-            "id": "new_doc",
-            "title": "New Document",
+            "id": "new_doc_after_lock",
+            "title": "New Document After Lock",
             "encryptedContent": "encrypted",
             "createdAt": "2024-01-01T00:00:00Z"
         }
@@ -1628,22 +1827,99 @@ async fn test_locked_box_cannot_add_documents() {
             "PATCH",
             &format!("/boxes/owned/{}/document", box_id),
             "user_1",
-            Some(doc_payload),
+            Some(new_doc_payload),
         ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let error_body = response_to_json(response).await;
+    assert!(error_body["error"].as_str().unwrap().contains("immutable"));
+
+    // Test 5: Cannot delete existing document
+    let response = app
+        .clone()
+        .oneshot(create_test_request(
+            "DELETE",
+            &format!("/boxes/owned/{}/document/test_doc_for_deletion", box_id),
+            "user_1",
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let error_body = response_to_json(response).await;
+    assert!(error_body["error"].as_str().unwrap().contains("immutable"));
+
+    // Test 6: Cannot add new guardian
+    let new_guardian_payload = json!({
+        "guardian": {
+            "id": "new_guardian_after_lock",
+            "name": "New Guardian After Lock",
+            "leadGuardian": false,
+            "status": "invited",
+            "addedAt": "2024-01-01T00:00:00Z",
+            "invitationId": "inv-test-new"
+        }
+    });
+
+    let response = app
+        .clone()
+        .oneshot(create_test_request(
+            "PATCH",
+            &format!("/boxes/owned/{}/guardian", box_id),
+            "user_1",
+            Some(new_guardian_payload),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let error_body = response_to_json(response).await;
+    assert!(error_body["error"].as_str().unwrap().contains("immutable"));
+
+    // Test 7: Cannot delete existing guardian
+    let response = app
+        .clone()
+        .oneshot(create_test_request(
+            "DELETE",
+            &format!(
+                "/boxes/owned/{}/guardian/test_guardian_for_deletion",
+                box_id
+            ),
+            "user_1",
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let error_body = response_to_json(response).await;
+    assert!(error_body["error"].as_str().unwrap().contains("immutable"));
 }
 
 #[tokio::test]
-async fn test_locked_box_cannot_add_guardians() {
+async fn test_box_lock_sets_correct_fields() {
     // Setup with mock data
     let (app, store) = create_test_app().await;
     add_test_data_to_store(&store).await;
 
     let box_id = "box_1";
 
-    // First, lock the box
+    // Get box before locking
+    let before_response = app
+        .clone()
+        .oneshot(create_test_request(
+            "GET",
+            &format!("/boxes/owned/{}", box_id),
+            "user_1",
+            None,
+        ))
+        .await
+        .unwrap();
+
+    let before_body = response_to_json(before_response).await;
+    assert_eq!(before_body["box"]["isLocked"].as_bool().unwrap(), false);
+    assert!(before_body["box"]["lockedAt"].is_null());
+
+    // Lock the box
     let lock_response = app
         .clone()
         .oneshot(create_test_request(
@@ -1654,34 +1930,193 @@ async fn test_locked_box_cannot_add_guardians() {
         ))
         .await
         .unwrap();
+
     assert_eq!(lock_response.status(), StatusCode::OK);
+    let lock_body = response_to_json(lock_response).await;
+
+    // Verify locked fields are set correctly
+    assert_eq!(lock_body["box"]["isLocked"].as_bool().unwrap(), true);
+    assert!(
+        lock_body["box"]["lockedAt"].is_string(),
+        "lockedAt should be set"
+    );
+
+    // Verify lockedAt is a valid timestamp
+    let locked_at = lock_body["box"]["lockedAt"].as_str().unwrap();
+    assert!(!locked_at.is_empty(), "lockedAt should not be empty");
 
     // Add delay for DynamoDB consistency
     if matches!(store, TestStore::DynamoDB(_)) {
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
     }
 
-    // Try to add a guardian - should fail
-    let guardian_payload = json!({
-        "guardian": {
-            "id": "new_guardian",
-            "name": "New Guardian",
-            "leadGuardian": false,
-            "status": "invited",
-            "addedAt": "2024-01-01T00:00:00Z",
-            "invitationId": "inv-test"
-        }
-    });
+    // Verify box is still locked when fetched again
+    let after_response = app
+        .clone()
+        .oneshot(create_test_request(
+            "GET",
+            &format!("/boxes/owned/{}", box_id),
+            "user_1",
+            None,
+        ))
+        .await
+        .unwrap();
 
+    let after_body = response_to_json(after_response).await;
+    assert_eq!(after_body["box"]["isLocked"].as_bool().unwrap(), true);
+    assert_eq!(after_body["box"]["lockedAt"].as_str().unwrap(), locked_at);
+}
+
+#[tokio::test]
+async fn test_cannot_unlock_locked_box() {
+    // Setup with mock data
+    let (app, store) = create_test_app().await;
+    add_test_data_to_store(&store).await;
+
+    let box_id = "box_1";
+
+    // Lock the box
+    app.clone()
+        .oneshot(create_test_request(
+            "PATCH",
+            &format!("/boxes/owned/{}", box_id),
+            "user_1",
+            Some(json!({"isLocked": true})),
+        ))
+        .await
+        .unwrap();
+
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
+
+    // Try to unlock - should return error
     let response = app
         .clone()
         .oneshot(create_test_request(
             "PATCH",
-            &format!("/boxes/owned/{}/guardian", box_id),
+            &format!("/boxes/owned/{}", box_id),
             "user_1",
-            Some(guardian_payload),
+            Some(json!({"isLocked": false})),
         ))
         .await
         .unwrap();
+
+    // Should return 400 BAD_REQUEST
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let error_body = response_to_json(response).await;
+    assert!(error_body["error"].as_str().unwrap().contains("unlock"));
+    assert!(error_body["error"].as_str().unwrap().contains("immutable"));
+}
+
+#[tokio::test]
+async fn test_lock_already_locked_box_is_idempotent() {
+    // Setup with mock data
+    let (app, store) = create_test_app().await;
+    add_test_data_to_store(&store).await;
+
+    let box_id = "box_1";
+
+    // Lock the box first time
+    let first_lock = app
+        .clone()
+        .oneshot(create_test_request(
+            "PATCH",
+            &format!("/boxes/owned/{}", box_id),
+            "user_1",
+            Some(json!({"isLocked": true})),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(first_lock.status(), StatusCode::OK);
+    let first_body = response_to_json(first_lock).await;
+    let first_locked_at = first_body["box"]["lockedAt"].as_str().unwrap().to_string();
+
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
+
+    // Lock again - should succeed (idempotent)
+    let second_lock = app
+        .clone()
+        .oneshot(create_test_request(
+            "PATCH",
+            &format!("/boxes/owned/{}", box_id),
+            "user_1",
+            Some(json!({"isLocked": true})),
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(second_lock.status(), StatusCode::OK);
+    let second_body = response_to_json(second_lock).await;
+
+    // Verify lockedAt timestamp didn't change (idempotent)
+    assert_eq!(
+        second_body["box"]["lockedAt"].as_str().unwrap(),
+        first_locked_at,
+        "lockedAt should not change when locking an already-locked box"
+    );
+}
+
+#[tokio::test]
+async fn test_can_delete_locked_box() {
+    // Setup with mock data
+    let (app, store) = create_test_app().await;
+    add_test_data_to_store(&store).await;
+
+    let box_id = "box_1";
+
+    // Lock the box
+    app.clone()
+        .oneshot(create_test_request(
+            "PATCH",
+            &format!("/boxes/owned/{}", box_id),
+            "user_1",
+            Some(json!({"isLocked": true})),
+        ))
+        .await
+        .unwrap();
+
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
+
+    // Delete the locked box - should succeed
+    // (Owner can delete their own box even if locked)
+    let response = app
+        .clone()
+        .oneshot(create_test_request(
+            "DELETE",
+            &format!("/boxes/owned/{}", box_id),
+            "user_1",
+            None,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
+
+    // Verify box is deleted
+    let verify_response = app
+        .clone()
+        .oneshot(create_test_request(
+            "GET",
+            &format!("/boxes/owned/{}", box_id),
+            "user_1",
+            None,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(verify_response.status(), StatusCode::NOT_FOUND);
 }

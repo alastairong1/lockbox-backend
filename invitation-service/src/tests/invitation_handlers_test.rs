@@ -1056,7 +1056,7 @@ async fn test_invitation_just_before_expiry() {
 
 #[tokio::test]
 async fn test_invitation_timezone_handling() {
-    let (app, store) = create_test_app().await;
+    let (_app, store) = create_test_app().await;
 
     let now = Utc::now();
     let id = Uuid::new_v4().to_string();
@@ -1598,7 +1598,7 @@ async fn test_gsi_query_performance() {
         return;
     }
 
-    let now = Utc::now();
+    let _now = Utc::now();
     let creator_id = "creator-gsi-perf";
     let num_invitations = 30;
 

@@ -39,6 +39,22 @@ pub struct GuardianUpdateRequest {
     pub guardian: Guardian,
 }
 
+#[derive(Deserialize, Debug)]
+pub struct IncomingShard {
+    #[serde(rename = "guardianId")]
+    pub guardian_id: String,
+    pub shard: String,
+    #[serde(rename = "shardHash")]
+    pub shard_hash: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct LockBoxRequest {
+    #[serde(rename = "shardThreshold")]
+    pub shard_threshold: usize,
+    pub shards: Vec<IncomingShard>,
+}
+
 // Response DTOs
 #[derive(Serialize, Debug)]
 pub struct BoxResponse {
@@ -53,6 +69,8 @@ pub struct BoxResponse {
     pub unlock_instructions: Option<String>,
     #[serde(rename = "isLocked")]
     pub is_locked: bool,
+    #[serde(rename = "lockedAt", skip_serializing_if = "Option::is_none")]
+    pub locked_at: Option<String>,
     pub documents: Vec<Document>,
     pub guardians: Vec<Guardian>,
     #[serde(rename = "ownerId")]
@@ -61,6 +79,14 @@ pub struct BoxResponse {
     pub owner_name: Option<String>,
     #[serde(rename = "unlockRequest")]
     pub unlock_request: Option<UnlockRequest>,
+    #[serde(rename = "shardThreshold", skip_serializing_if = "Option::is_none")]
+    pub shard_threshold: Option<u32>,
+    #[serde(rename = "shardsFetched", skip_serializing_if = "Option::is_none")]
+    pub shards_fetched: Option<usize>,
+    #[serde(rename = "totalShards", skip_serializing_if = "Option::is_none")]
+    pub total_shards: Option<usize>,
+    #[serde(rename = "shardsDeletedAt", skip_serializing_if = "Option::is_none")]
+    pub shards_deleted_at: Option<String>,
 }
 
 impl From<lockbox_shared::models::BoxRecord> for BoxResponse {
@@ -73,11 +99,16 @@ impl From<lockbox_shared::models::BoxRecord> for BoxResponse {
             updated_at: box_rec.updated_at,
             unlock_instructions: box_rec.unlock_instructions,
             is_locked: box_rec.is_locked,
+            locked_at: box_rec.locked_at,
             documents: box_rec.documents,
             guardians: box_rec.guardians,
             owner_id: box_rec.owner_id,
             owner_name: box_rec.owner_name,
             unlock_request: box_rec.unlock_request,
+            shard_threshold: box_rec.shard_threshold,
+            shards_fetched: box_rec.shards_fetched,
+            total_shards: box_rec.total_shards,
+            shards_deleted_at: box_rec.shards_deleted_at,
         }
     }
 }

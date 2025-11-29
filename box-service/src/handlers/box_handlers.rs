@@ -629,12 +629,17 @@ where
     }
 
     // Check if the guardian exists in the box and capture it for response
-    let guardian_index = box_rec.guardians.iter().position(|g| g.id == guardian_id);
+    // Try to match by guardian.id first, then fall back to invitation_id
+    // (guardians in 'invited' status have empty id until they view the invitation)
+    let guardian_index = box_rec
+        .guardians
+        .iter()
+        .position(|g| g.id == guardian_id || g.invitation_id == guardian_id);
     let removed_guardian = match guardian_index {
         Some(index) => box_rec.guardians.remove(index),
         None => {
             return Err(AppError::not_found(format!(
-                "Guardian with ID {} not found in box {}",
+                "Guardian with ID or invitation_id {} not found in box {}",
                 guardian_id, box_id
             )));
         }

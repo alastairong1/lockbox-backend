@@ -291,6 +291,20 @@ pub struct MessageResponse {
     pub box_id: Option<String>,
 }
 
+/// Push token record for storing Expo push tokens
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct PushToken {
+    /// User ID (primary key)
+    pub user_id: String,
+    /// Expo push token (e.g., "ExponentPushToken[...]")
+    pub push_token: String,
+    /// Platform (ios or android)
+    pub platform: String,
+    /// When the token was registered/updated
+    pub updated_at: String,
+}
+
 // Helper function to get current timestamp as string
 pub fn now_str() -> String {
     Utc::now().to_rfc3339()

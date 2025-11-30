@@ -87,9 +87,18 @@ Resources:
             Method: ANY
             Auth:
               Authorizer: CognitoAuthorizer
+        UsersApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGatewayApi
+            Path: /users/{proxy+}
+            Method: ANY
+            Auth:
+              Authorizer: CognitoAuthorizer
       Environment:
         Variables:
           DYNAMODB_TABLE: !Ref BoxesTable
+          DYNAMODB_PUSH_TOKENS_TABLE: !Ref PushTokensTable
           RUST_LOG: info
           COGNITO_USER_POOL_ID: !Ref UserPoolId
           COGNITO_APP_CLIENT_ID: !Ref UserPoolClient
@@ -98,6 +107,8 @@ Resources:
             TableName: !Ref BoxesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref InvitationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PushTokensTable
         - Version: '2012-10-17'
           Statement:
             - Effect: Allow
@@ -225,6 +236,21 @@ Resources:
       # Enable point-in-time recovery for continuous backup
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
+
+  # Push Tokens Table - stores Expo push tokens for users
+  PushTokensTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: push-tokens-table
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
 
   # SNS Topic for Lockbox Events
   LockboxEventsTopic:

@@ -28,4 +28,6 @@ tower = { version = "0.4.13", features = ["util"] }
 tower-http = { workspace = true }
 # Logging
 log = { workspace = true }
-env_logger = { workspace = true } 
+env_logger = { workspace = true }
+# HTTP client for push notifications
+reqwest = { workspace = true }

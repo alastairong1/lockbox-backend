@@ -3,7 +3,10 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use lockbox_shared::store::BoxStore;
+use lockbox_shared::push::send_shard_notification;
+use lockbox_shared::store::dynamo::DynamoPushTokenStore;
+use lockbox_shared::store::{BoxStore, PushTokenStore};
+use log::{error, info};
 use serde_json;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -343,7 +346,60 @@ where
     box_rec.shards_fetched = Some(0);
     box_rec.shards_deleted_at = None;
 
+    // Store box name and owner name before updating (for push notification)
+    let box_name = box_rec.name.clone();
+    let owner_name = box_rec.owner_name.clone().unwrap_or_else(|| "Someone".to_string());
+    let box_id = box_rec.id.clone();
+
+    // Get guardian user IDs for push notifications
+    let guardian_ids: Vec<String> = box_rec
+        .guardians
+        .iter()
+        .filter(|g| !g.id.is_empty()) // Only guardians who have viewed the invitation
+        .map(|g| g.id.clone())
+        .collect();
+
     let updated_box = store.update_box(box_rec).await?;
+
+    // Send push notifications to guardians (fire and forget - don't block the response)
+    if !guardian_ids.is_empty() {
+        info!(
+            "Sending push notifications to {} guardians for box {}",
+            guardian_ids.len(),
+            box_id
+        );
+
+        // Spawn a task to send notifications without blocking
+        let box_name_clone = box_name.clone();
+        let owner_name_clone = owner_name.clone();
+        let box_id_clone = box_id.clone();
+
+        tokio::spawn(async move {
+            let push_store = DynamoPushTokenStore::new().await;
+            match push_store.get_push_tokens(&guardian_ids).await {
+                Ok(tokens) => {
+                    if tokens.is_empty() {
+                        info!("No push tokens found for guardians");
+                    } else {
+                        info!("Found {} push tokens, sending notifications", tokens.len());
+                        if let Err(e) = send_shard_notification(
+                            &tokens,
+                            &box_name_clone,
+                            &owner_name_clone,
+                            &box_id_clone,
+                        )
+                        .await
+                        {
+                            error!("Failed to send shard notifications: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to get push tokens for guardians: {:?}", e);
+                }
+            }
+        });
+    }
 
     Ok(Json(
         serde_json::json!({ "box": BoxResponse::from(updated_box) }),

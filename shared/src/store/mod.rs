@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
 use crate::error::Result;
-use crate::models::{BoxRecord, GuardianStatus, Invitation};
+use crate::models::{BoxRecord, GuardianStatus, Invitation, PushToken};
 
 // Expose the DynamoDB store module
 pub mod dynamo;
@@ -51,6 +51,22 @@ pub trait BoxStore: Send + Sync + 'static {
 
     /// Deletes a box
     async fn delete_box(&self, id: &str) -> Result<()>;
+}
+
+/// PushTokenStore trait defining the interface for push token storage
+#[async_trait]
+pub trait PushTokenStore: Send + Sync + 'static {
+    /// Saves or updates a push token for a user
+    async fn save_push_token(&self, token: PushToken) -> Result<PushToken>;
+
+    /// Gets a push token by user ID
+    async fn get_push_token(&self, user_id: &str) -> Result<Option<PushToken>>;
+
+    /// Gets push tokens for multiple user IDs
+    async fn get_push_tokens(&self, user_ids: &[String]) -> Result<Vec<PushToken>>;
+
+    /// Deletes a push token for a user
+    async fn delete_push_token(&self, user_id: &str) -> Result<()>;
 }
 
 // Box store utility functions

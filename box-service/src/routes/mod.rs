@@ -1,7 +1,7 @@
 use axum::{
     extract::Request,
     middleware,
-    routing::{get, patch, post},
+    routing::{get, patch, post, put},
     Router,
 };
 use log::{info, warn};
@@ -18,6 +18,7 @@ use crate::handlers::{
         get_guardian_box, get_guardian_boxes, request_unlock, respond_to_invitation,
         respond_to_unlock_request,
     },
+    user_handlers::register_push_token,
 };
 use lockbox_shared::store::{dynamo::DynamoBoxStore, BoxStore};
 
@@ -71,8 +72,8 @@ where
         next.run(req).await
     }
 
-    // Create the API routes
-    let api_routes = Router::new()
+    // Create the box API routes (require store state)
+    let box_routes = Router::new()
         .route("/boxes/owned", get(get_boxes).post(create_box))
         .route(
             "/boxes/owned/:id",
@@ -107,6 +108,14 @@ where
         )
         .layer(middleware::from_fn(auth_middleware))
         .with_state(store);
+
+    // Create the user API routes (no store state needed)
+    let user_routes = Router::new()
+        .route("/users/push-token", put(register_push_token))
+        .layer(middleware::from_fn(auth_middleware));
+
+    // Merge all API routes
+    let api_routes = box_routes.merge(user_routes);
 
     // Create the main router
     let router = if prefix.is_empty() {

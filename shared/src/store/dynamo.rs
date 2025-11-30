@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::env;
 
 use crate::error::{map_dynamo_error, Result, StoreError};
-use crate::models::{now_str, BoxRecord, Invitation};
+use crate::models::{now_str, BoxRecord, Invitation, PushToken};
 
 // Invitation Store Constants
 const TABLE_NAME: &str = "invitation-table";
@@ -24,6 +24,9 @@ const GSI_CREATOR_ID: &str = "creatorId-index";
 // Box Store Constants
 const BOX_TABLE_NAME: &str = "box-table";
 const GSI_OWNER_ID: &str = "owner_id-index";
+
+// Push Token Store Constants
+const PUSH_TOKEN_TABLE_NAME: &str = "push-tokens-table";
 
 // DynamoInvitationStore
 
@@ -551,6 +554,125 @@ fn map_query_dynamo_error(err: SdkError<QueryError>) -> StoreError {
 
 fn map_scan_dynamo_error(err: SdkError<ScanError>) -> StoreError {
     StoreError::InternalError(format!("DynamoDB scan error: {}", err))
+}
+
+// PUSH TOKEN STORE
+
+/// DynamoDB store for push tokens
+pub struct DynamoPushTokenStore {
+    client: Client,
+    table_name: String,
+}
+
+impl DynamoPushTokenStore {
+    /// Creates a new DynamoDB push token store
+    pub async fn new() -> Self {
+        let config = aws_config::defaults(BehaviorVersion::latest()).load().await;
+        let client = Client::new(&config);
+
+        let table_name = env::var("DYNAMODB_PUSH_TOKENS_TABLE")
+            .unwrap_or_else(|_| PUSH_TOKEN_TABLE_NAME.to_string());
+
+        Self { client, table_name }
+    }
+
+    /// Creates a new store with the specified client and table name (for testing)
+    #[allow(dead_code)]
+    pub fn with_client_and_table(client: Client, table_name: String) -> Self {
+        Self { client, table_name }
+    }
+}
+
+#[async_trait]
+impl super::PushTokenStore for DynamoPushTokenStore {
+    async fn save_push_token(&self, token: PushToken) -> Result<PushToken> {
+        let item = to_item(&token)?;
+
+        self.client
+            .put_item()
+            .table_name(&self.table_name)
+            .set_item(Some(item))
+            .send()
+            .await
+            .map_err(|e| map_dynamo_error("put_item", e))?;
+
+        Ok(token)
+    }
+
+    async fn get_push_token(&self, user_id: &str) -> Result<Option<PushToken>> {
+        let key = HashMap::from([("userId".to_string(), AttributeValue::S(user_id.to_string()))]);
+
+        let response = self
+            .client
+            .get_item()
+            .table_name(&self.table_name)
+            .set_key(Some(key))
+            .send()
+            .await
+            .map_err(|e| map_dynamo_error("get_item", e))?;
+
+        match response.item() {
+            Some(item) => {
+                let token: PushToken = from_item(item.clone())?;
+                Ok(Some(token))
+            }
+            None => Ok(None),
+        }
+    }
+
+    async fn get_push_tokens(&self, user_ids: &[String]) -> Result<Vec<PushToken>> {
+        if user_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Use BatchGetItem for efficiency
+        let keys: Vec<HashMap<String, AttributeValue>> = user_ids
+            .iter()
+            .map(|id| HashMap::from([("userId".to_string(), AttributeValue::S(id.clone()))]))
+            .collect();
+
+        let request_items = HashMap::from([(
+            self.table_name.clone(),
+            aws_sdk_dynamodb::types::KeysAndAttributes::builder()
+                .set_keys(Some(keys))
+                .build()
+                .map_err(|e| StoreError::InternalError(format!("Failed to build keys: {}", e)))?,
+        )]);
+
+        let response = self
+            .client
+            .batch_get_item()
+            .set_request_items(Some(request_items))
+            .send()
+            .await
+            .map_err(|e| map_dynamo_error("batch_get_item", e))?;
+
+        let mut tokens = Vec::new();
+        if let Some(responses) = response.responses() {
+            if let Some(items) = responses.get(&self.table_name) {
+                for item in items {
+                    let token: PushToken = from_item(item.clone())?;
+                    tokens.push(token);
+                }
+            }
+        }
+
+        Ok(tokens)
+    }
+
+    async fn delete_push_token(&self, user_id: &str) -> Result<()> {
+        let key = HashMap::from([("userId".to_string(), AttributeValue::S(user_id.to_string()))]);
+
+        self.client
+            .delete_item()
+            .table_name(&self.table_name)
+            .set_key(Some(key))
+            .send()
+            .await
+            .map_err(|e| map_dynamo_error("delete_item", e))?;
+
+        Ok(())
+    }
 }
 
 // Builder pattern alternative

@@ -62,6 +62,7 @@ pub async fn handle_invitation_created(
         encrypted_shard: None,
         shard_hash: None,
         shard_fetched_at: None,
+        shard_accepted_at: None,
     };
 
     // Add guardian to box

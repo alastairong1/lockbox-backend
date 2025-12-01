@@ -179,6 +179,12 @@ pub struct Guardian {
         default
     )]
     pub shard_fetched_at: Option<String>,
+    #[serde(
+        rename = "shardAcceptedAt",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub shard_accepted_at: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

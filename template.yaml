@@ -316,6 +316,36 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref PushTokensTable
 
+  # Lambda function to send reminder notifications for unaccepted shards
+  ReminderServiceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: reminder-service
+      CodeUri: reminder-service.zip
+      Handler: bootstrap
+      Runtime: provided.al2
+      Architectures:
+        - x86_64
+      Timeout: 300  # 5 minutes to process all boxes
+      Events:
+        # Run every 6 hours
+        ScheduledEvent:
+          Type: Schedule
+          Properties:
+            Schedule: rate(6 hours)
+            Description: Check for unaccepted shards and send reminders
+            Enabled: true
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref BoxesTable
+          DYNAMODB_PUSH_TOKENS_TABLE: !Ref PushTokensTable
+          RUST_LOG: info
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref BoxesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref PushTokensTable
+
   # Setup daily backups using AWS Backup
   BoxesTableBackupPlan:
     Type: AWS::Backup::BackupPlan
@@ -373,6 +403,9 @@ Outputs:
   NotificationServiceFunction:
     Description: "Notification Service Function ARN"
     Value: !GetAtt NotificationServiceFunction.Arn
+  ReminderServiceFunction:
+    Description: "Reminder Service Function ARN"
+    Value: !GetAtt ReminderServiceFunction.Arn
   ApiURL:
     Description: "API Gateway endpoint URL for Prod stage"
     Value: !Sub "https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"

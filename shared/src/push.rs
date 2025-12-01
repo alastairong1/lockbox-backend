@@ -17,6 +17,9 @@ pub struct ExpoPushMessage {
     pub sound: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub badge: Option<u32>,
+    /// Enable iOS background fetch (content-available: 1)
+    #[serde(rename = "_contentAvailable", skip_serializing_if = "Option::is_none")]
+    pub content_available: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,6 +57,7 @@ pub async fn send_push_notifications(
             data: data.clone(),
             sound: Some("default".to_string()),
             badge: Some(1),
+            content_available: Some(true), // Enable background fetch on iOS
         })
         .collect();
 
@@ -115,9 +119,9 @@ pub async fn send_shard_notification(
     owner_name: &str,
     box_id: &str,
 ) -> Result<Vec<ExpoPushTicket>, String> {
-    let title = "New Key Shard Received";
+    let title = "Action Required: Accept Key Shard";
     let body = format!(
-        "{} has locked their Lockbox \"{}\". You've been entrusted with a key shard.",
+        "{} has entrusted you with a key shard for \"{}\". Tap to accept and secure it.",
         owner_name, box_name
     );
 
@@ -126,6 +130,41 @@ pub async fn send_shard_notification(
         "boxId": box_id,
         "boxName": box_name,
         "ownerName": owner_name
+    });
+
+    send_push_notifications(tokens, title, &body, Some(data)).await
+}
+
+/// Sends a reminder notification for unaccepted shards
+pub async fn send_shard_reminder_notification(
+    tokens: &[PushToken],
+    box_name: &str,
+    owner_name: &str,
+    box_id: &str,
+    reminder_number: u32,
+) -> Result<Vec<ExpoPushTicket>, String> {
+    let title = "Reminder: Accept Your Key Shard";
+    let body = match reminder_number {
+        1 => format!(
+            "You still need to accept the key shard from {} for \"{}\". Tap to secure it now.",
+            owner_name, box_name
+        ),
+        2 => format!(
+            "Important: {} is counting on you. Please accept the key shard for \"{}\".",
+            owner_name, box_name
+        ),
+        _ => format!(
+            "Final reminder: Accept the key shard from {} for \"{}\" to complete your guardian setup.",
+            owner_name, box_name
+        ),
+    };
+
+    let data = serde_json::json!({
+        "type": "shard_reminder",
+        "boxId": box_id,
+        "boxName": box_name,
+        "ownerName": owner_name,
+        "reminderNumber": reminder_number
     });
 
     send_push_notifications(tokens, title, &body, Some(data)).await

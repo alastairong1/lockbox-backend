@@ -51,6 +51,9 @@ pub trait BoxStore: Send + Sync + 'static {
 
     /// Deletes a box
     async fn delete_box(&self, id: &str) -> Result<()>;
+
+    /// Scans all locked boxes (for reminder service)
+    async fn scan_locked_boxes(&self) -> Result<Vec<BoxRecord>>;
 }
 
 /// PushTokenStore trait defining the interface for push token storage

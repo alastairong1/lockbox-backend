@@ -5,6 +5,7 @@ members = [
     "shared",
     "invitation-event-service",
     "notification-service",
+    "reminder-service",
 ]
 resolver = "2"
 

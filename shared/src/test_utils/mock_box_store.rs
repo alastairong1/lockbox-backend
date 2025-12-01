@@ -189,4 +189,16 @@ impl BoxStore for MockBoxStore {
 
         Ok(())
     }
+
+    async fn scan_locked_boxes(&self) -> Result<Vec<BoxRecord>> {
+        let boxes = self.boxes.lock().unwrap();
+
+        let locked_boxes: Vec<BoxRecord> = boxes
+            .values()
+            .filter(|b| b.is_locked)
+            .cloned()
+            .collect();
+
+        Ok(locked_boxes)
+    }
 }

@@ -153,6 +153,67 @@ where
         "shardsFetched": fetched_count
     })))
 }
+
+// POST /boxes/guardian/:id/shard/accept
+// "Accept" the shard - this is a placebo action for UX purposes.
+// The shard data is already stored/fetched; this just records user acknowledgment.
+pub async fn accept_guardian_shard<S>(
+    State(store): State<Arc<S>>,
+    Path(id): Path<String>,
+    Extension(user_id): Extension<String>,
+) -> Result<Json<serde_json::Value>>
+where
+    S: BoxStore,
+{
+    let mut box_rec = store.get_box(&id).await?;
+
+    if !box_rec.is_locked {
+        return Err(AppError::bad_request(
+            "Shard acceptance is only available for locked boxes.".into(),
+        ));
+    }
+
+    let guardian_index = box_rec
+        .guardians
+        .iter()
+        .position(|g| g.id == user_id)
+        .ok_or_else(|| AppError::unauthorized("You are not a guardian for this box.".into()))?;
+
+    let guardian = &mut box_rec.guardians[guardian_index];
+
+    // If already accepted, return current state
+    if guardian.shard_accepted_at.is_some() {
+        return Ok(Json(serde_json::json!({
+            "message": "Shard already accepted",
+            "shardAcceptedAt": guardian.shard_accepted_at.clone(),
+            "boxId": box_rec.id,
+            "boxName": box_rec.name
+        })));
+    }
+
+    // Mark as accepted
+    let accepted_at = now_str();
+    guardian.shard_accepted_at = Some(accepted_at.clone());
+    box_rec.updated_at = now_str();
+
+    let box_name = box_rec.name.clone();
+    let box_id = box_rec.id.clone();
+
+    let _ = store.update_box(box_rec).await?;
+
+    info!(
+        "Guardian {} accepted shard for box_id={}",
+        user_id, box_id
+    );
+
+    Ok(Json(serde_json::json!({
+        "message": "Shard accepted successfully",
+        "shardAcceptedAt": accepted_at,
+        "boxId": box_id,
+        "boxName": box_name
+    })))
+}
+
 // GET /boxes/:id
 pub async fn get_box<S>(
     State(store): State<Arc<S>>,

@@ -10,9 +10,9 @@ use tower_http::cors::{Any, CorsLayer};
 
 use crate::handlers::{
     box_handlers::{
-        acknowledge_guardian_shard, create_box, delete_box, delete_document, delete_guardian,
-        fetch_guardian_shard, get_box, get_boxes, lock_box, update_box, update_document,
-        update_guardian,
+        accept_guardian_shard, acknowledge_guardian_shard, create_box, delete_box, delete_document,
+        delete_guardian, fetch_guardian_shard, get_box, get_boxes, lock_box, update_box,
+        update_document, update_guardian,
     },
     guardian_handlers::{
         get_guardian_box, get_guardian_boxes, request_unlock, respond_to_invitation,
@@ -96,6 +96,10 @@ where
         .route(
             "/boxes/guardian/:id/shard/ack",
             patch(acknowledge_guardian_shard),
+        )
+        .route(
+            "/boxes/guardian/:id/shard/accept",
+            post(accept_guardian_shard),
         )
         .route("/boxes/guardian/:id/request", patch(request_unlock))
         .route(

@@ -32,6 +32,12 @@ cd notification-service
 cargo build --release --target x86_64-unknown-linux-musl
 cd ..
 
+# Build the reminder service
+echo "Building reminder service..."
+cd reminder-service
+cargo build --release --target x86_64-unknown-linux-musl
+cd ..
+
 # Package the invitation service
 echo "Packaging invitation service..."
 mkdir -p dist
@@ -55,6 +61,12 @@ rm bootstrap
 echo "Packaging notification service..."
 cp notification-service/target/x86_64-unknown-linux-musl/release/notification-service ./bootstrap
 zip -j notification-service.zip bootstrap
+rm bootstrap
+
+# Package the reminder service
+echo "Packaging reminder service..."
+cp reminder-service/target/x86_64-unknown-linux-musl/release/reminder-service ./bootstrap
+zip -j reminder-service.zip bootstrap
 rm bootstrap
 
 echo "Build process complete! Lambda zip files are ready for deployment." 

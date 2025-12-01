@@ -245,6 +245,38 @@ impl super::BoxStore for DynamoBoxStore {
         Ok(())
     }
 
+    /// Scans all locked boxes (for reminder service)
+    ///
+    /// Implementation notes:
+    /// - Uses a full table scan with filter expression for is_locked = true
+    /// - For production systems with many boxes, consider adding a GSI on isLocked
+    async fn scan_locked_boxes(&self) -> Result<Vec<BoxRecord>> {
+        let expr_attr_names = HashMap::from([("#is_locked".to_string(), "isLocked".to_string())]);
+        let expr_attr_values =
+            HashMap::from([(":locked".to_string(), AttributeValue::Bool(true))]);
+
+        let response = self
+            .client
+            .scan()
+            .table_name(&self.table_name)
+            .filter_expression("#is_locked = :locked")
+            .set_expression_attribute_names(Some(expr_attr_names))
+            .set_expression_attribute_values(Some(expr_attr_values))
+            .send()
+            .await
+            .map_err(|e| map_scan_dynamo_error(e))?;
+
+        let items = response.items();
+
+        let mut boxes = Vec::new();
+        for item in items {
+            let box_record: BoxRecord = from_item(item.clone())?;
+            boxes.push(box_record);
+        }
+
+        Ok(boxes)
+    }
+
     /// Gets all boxes where the given user is a guardian (with status not rejected)
     ///
     /// Implementation notes:

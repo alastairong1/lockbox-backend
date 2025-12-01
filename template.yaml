@@ -102,6 +102,7 @@ Resources:
           RUST_LOG: info
           COGNITO_USER_POOL_ID: !Ref UserPoolId
           COGNITO_APP_CLIENT_ID: !Ref UserPoolClient
+          SNS_TOPIC_ARN: !Ref LockboxEventsTopic
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref BoxesTable
@@ -109,6 +110,8 @@ Resources:
             TableName: !Ref InvitationsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PushTokensTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt LockboxEventsTopic.TopicName
         - Version: '2012-10-17'
           Statement:
             - Effect: Allow
@@ -287,6 +290,32 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref BoxesTable
 
+  # Lambda function to send push notifications when boxes are locked
+  NotificationServiceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: notification-service
+      CodeUri: notification-service.zip
+      Handler: bootstrap
+      Runtime: provided.al2
+      Architectures:
+        - x86_64
+      Events:
+        BoxLockedEvents:
+          Type: SNS
+          Properties:
+            Topic: !Ref LockboxEventsTopic
+            FilterPolicy:
+              eventType:
+                - box_locked
+      Environment:
+        Variables:
+          DYNAMODB_PUSH_TOKENS_TABLE: !Ref PushTokensTable
+          RUST_LOG: info
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PushTokensTable
+
   # Setup daily backups using AWS Backup
   BoxesTableBackupPlan:
     Type: AWS::Backup::BackupPlan
@@ -341,6 +370,9 @@ Outputs:
   InvitationEventHandlerFunction:
     Description: "Invitation Event Handler Function ARN"
     Value: !GetAtt InvitationEventHandlerFunction.Arn
+  NotificationServiceFunction:
+    Description: "Notification Service Function ARN"
+    Value: !GetAtt NotificationServiceFunction.Arn
   ApiURL:
     Description: "API Gateway endpoint URL for Prod stage"
     Value: !Sub "https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"

@@ -1,14 +1,16 @@
+use aws_sdk_sns::Client as SnsClient;
 use axum::{
     extract::{Extension, Path, State},
     http::StatusCode,
     Json,
 };
-use lockbox_shared::push::send_shard_notification;
-use lockbox_shared::store::dynamo::DynamoPushTokenStore;
-use lockbox_shared::store::{BoxStore, PushTokenStore};
-use log::{error, info};
+use lockbox_shared::store::BoxStore;
+use log::{debug, error, info};
 use serde_json;
+use std::collections::HashMap;
+use std::env;
 use std::sync::Arc;
+use tokio::sync::OnceCell;
 use uuid::Uuid;
 
 use crate::error::{AppError, Result};
@@ -340,65 +342,36 @@ where
     let now = now_str();
     box_rec.is_locked = true;
     box_rec.locked_at = Some(now.clone());
-    box_rec.updated_at = now;
+    box_rec.updated_at = now.clone();
     box_rec.shard_threshold = Some(payload.shard_threshold as u32);
     box_rec.total_shards = Some(payload.shards.len());
     box_rec.shards_fetched = Some(0);
     box_rec.shards_deleted_at = None;
 
-    // Store box name and owner name before updating (for push notification)
-    let box_name = box_rec.name.clone();
-    let owner_name = box_rec.owner_name.clone().unwrap_or_else(|| "Someone".to_string());
+    // Capture data for SNS event before consuming box_rec
     let box_id = box_rec.id.clone();
-
-    // Get guardian user IDs for push notifications
+    let box_name = box_rec.name.clone();
+    let owner_name = box_rec.owner_name.clone();
     let guardian_ids: Vec<String> = box_rec
         .guardians
         .iter()
-        .filter(|g| !g.id.is_empty()) // Only guardians who have viewed the invitation
+        .filter(|g| !g.id.is_empty())
         .map(|g| g.id.clone())
         .collect();
 
     let updated_box = store.update_box(box_rec).await?;
 
-    // Send push notifications to guardians (fire and forget - don't block the response)
-    if !guardian_ids.is_empty() {
-        info!(
-            "Sending push notifications to {} guardians for box {}",
-            guardian_ids.len(),
-            box_id
-        );
-
-        // Spawn a task to send notifications without blocking
-        let box_name_clone = box_name.clone();
-        let owner_name_clone = owner_name.clone();
-        let box_id_clone = box_id.clone();
-
-        tokio::spawn(async move {
-            let push_store = DynamoPushTokenStore::new().await;
-            match push_store.get_push_tokens(&guardian_ids).await {
-                Ok(tokens) => {
-                    if tokens.is_empty() {
-                        info!("No push tokens found for guardians");
-                    } else {
-                        info!("Found {} push tokens, sending notifications", tokens.len());
-                        if let Err(e) = send_shard_notification(
-                            &tokens,
-                            &box_name_clone,
-                            &owner_name_clone,
-                            &box_id_clone,
-                        )
-                        .await
-                        {
-                            error!("Failed to send shard notifications: {}", e);
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to get push tokens for guardians: {:?}", e);
-                }
-            }
-        });
+    // Publish box_locked event to SNS (fire and forget)
+    if let Err(e) = publish_box_locked_event(
+        &box_id,
+        &box_name,
+        owner_name.as_deref(),
+        &guardian_ids,
+        &now,
+    )
+    .await
+    {
+        error!("Failed to publish box_locked event: {:?}", e);
     }
 
     Ok(Json(
@@ -736,4 +709,99 @@ where
         "message": "Guardian deleted successfully",
         "guardian": response
     })))
+}
+
+// SNS Publishing for box events
+static SNS_CLIENT: OnceCell<SnsClient> = OnceCell::const_new();
+static TOPIC_ARN: OnceCell<String> = OnceCell::const_new();
+
+/// Publishes a box_locked event to SNS
+pub async fn publish_box_locked_event(
+    box_id: &str,
+    box_name: &str,
+    owner_name: Option<&str>,
+    guardian_ids: &[String],
+    timestamp: &str,
+) -> Result<()> {
+    debug!(
+        "publish_box_locked_event called for box_id={}, guardian_count={}",
+        box_id,
+        guardian_ids.len()
+    );
+
+    // Check if we're in test mode
+    if let Ok(test_sns) = env::var("TEST_SNS") {
+        if test_sns == "true" {
+            debug!(
+                "Test mode: Skipping SNS publishing for box_locked event, box_id={}",
+                box_id
+            );
+            return Ok(());
+        }
+    }
+
+    // Get or initialize SNS client
+    let client = SNS_CLIENT
+        .get_or_init(|| async {
+            let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+                .load()
+                .await;
+            SnsClient::new(&config)
+        })
+        .await
+        .clone();
+
+    // Get or initialize topic ARN
+    let topic_arn = TOPIC_ARN
+        .get_or_try_init(|| async {
+            env::var("SNS_TOPIC_ARN").map_err(|_| {
+                AppError::internal_server_error("SNS_TOPIC_ARN environment variable not set".into())
+            })
+        })
+        .await?;
+
+    // Create the event payload
+    let event_payload = serde_json::json!({
+        "event_type": "box_locked",
+        "box_id": box_id,
+        "box_name": box_name,
+        "owner_name": owner_name,
+        "guardian_ids": guardian_ids,
+        "timestamp": timestamp
+    });
+
+    let message = serde_json::to_string(&event_payload).map_err(|e| {
+        AppError::internal_server_error(format!("Failed to serialize event payload: {}", e))
+    })?;
+
+    // Build message attributes for filtering
+    let event_type_attr = aws_sdk_sns::types::MessageAttributeValue::builder()
+        .data_type("String")
+        .string_value("box_locked")
+        .build()
+        .map_err(|e| {
+            AppError::internal_server_error(format!("Failed to build message attribute: {}", e))
+        })?;
+
+    let mut message_attributes = HashMap::new();
+    message_attributes.insert("eventType".to_string(), event_type_attr);
+
+    // Publish to SNS
+    client
+        .publish()
+        .topic_arn(topic_arn)
+        .message(message)
+        .subject("Box Locked")
+        .set_message_attributes(Some(message_attributes))
+        .send()
+        .await
+        .map_err(|e| {
+            AppError::internal_server_error(format!("Failed to publish to SNS: {}", e))
+        })?;
+
+    info!(
+        "Successfully published box_locked event for box_id={}",
+        box_id
+    );
+    Ok(())
 }

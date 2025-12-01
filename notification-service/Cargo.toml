@@ -1,0 +1,20 @@
+[package]
+name = "notification-service"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+thiserror = { workspace = true }
+aws-config = { workspace = true }
+aws_lambda_events = { version = "0.11", default-features = false, features = ["sns"] }
+lambda_runtime = { workspace = true }
+reqwest = { workspace = true }
+anyhow = "1.0"
+
+# Include the shared crate
+lockbox-shared = { path = "../shared" }

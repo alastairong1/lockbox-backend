@@ -31,6 +31,18 @@ pushd invitation-event-service
 cargo test -- --test-threads=1
 popd
 
+# Run notification service tests
+echo "Running notification service unit tests..."
+pushd notification-service
+cargo test -- --test-threads=1
+popd
+
+# Run reminder service tests
+echo "Running reminder service unit tests..."
+pushd reminder-service
+cargo test -- --test-threads=1
+popd
+
 # Then run integration tests with DynamoDB Local
 echo ""
 echo "=== Running integration tests with DynamoDB store ==="

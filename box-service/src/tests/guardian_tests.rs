@@ -49,6 +49,7 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
                 encrypted_shard: None,
                 shard_hash: None,
                 shard_fetched_at: None,
+                shard_accepted_at: None,
             },
             Guardian {
                 id: "guardian_2".into(),
@@ -61,6 +62,7 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
                 encrypted_shard: None,
                 shard_hash: None,
                 shard_fetched_at: None,
+                shard_accepted_at: None,
             },
             Guardian {
                 id: "lead_guardian_1".into(),
@@ -73,6 +75,7 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
                 encrypted_shard: None,
                 shard_hash: None,
                 shard_fetched_at: None,
+                shard_accepted_at: None,
             },
         ],
         unlock_instructions: Some("Contact all guardians".into()),
@@ -119,6 +122,7 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
                 encrypted_shard: None,
                 shard_hash: None,
                 shard_fetched_at: None,
+                shard_accepted_at: None,
             },
             Guardian {
                 id: "guardian_3".into(),
@@ -131,6 +135,7 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
                 encrypted_shard: None,
                 shard_hash: None,
                 shard_fetched_at: None,
+                shard_accepted_at: None,
             },
             Guardian {
                 id: "lead_guardian_1".into(),
@@ -143,6 +148,7 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
                 encrypted_shard: None,
                 shard_hash: None,
                 shard_fetched_at: None,
+                shard_accepted_at: None,
             },
         ],
         unlock_instructions: Some("Call emergency contact".into()),
@@ -178,6 +184,7 @@ fn create_test_data(now: &str) -> Vec<BoxRecord> {
             encrypted_shard: None,
             shard_hash: None,
             shard_fetched_at: None,
+            shard_accepted_at: None,
         }],
         unlock_instructions: None,
         unlock_request: None,
@@ -841,6 +848,7 @@ async fn test_accept_guardian_invitation() {
         encrypted_shard: None,
         shard_hash: None,
         shard_fetched_at: None,
+        shard_accepted_at: None,
     };
 
     replace_guardian(
@@ -900,6 +908,7 @@ async fn test_reject_guardian_invitation() {
         encrypted_shard: None,
         shard_hash: None,
         shard_fetched_at: None,
+        shard_accepted_at: None,
     };
 
     replace_guardian(
@@ -959,6 +968,7 @@ async fn test_guardian_invitation_without_pending_status() {
         encrypted_shard: None,
         shard_hash: None,
         shard_fetched_at: None,
+        shard_accepted_at: None,
     };
 
     replace_guardian(
@@ -1091,4 +1101,248 @@ async fn test_non_guardian_cannot_respond() {
             .contains(&"not_a_guardian".to_string()),
         "not_a_guardian should not be in rejected_by list"
     );
+}
+
+// ==================== Accept Guardian Shard Tests ====================
+
+#[tokio::test]
+async fn test_accept_guardian_shard_success() {
+    let (app, store) = create_test_app().await;
+    add_test_data_to_store(&store).await;
+
+    let box_id = "11111111-1111-1111-1111-111111111111";
+
+    // Verify shard is not accepted initially
+    let initial_box = match &store {
+        TestStore::Mock(mock) => mock.get_box(box_id).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.get_box(box_id).await.unwrap(),
+    };
+    let initial_guardian = initial_box
+        .guardians
+        .iter()
+        .find(|g| g.id == "guardian_1")
+        .unwrap();
+    assert!(
+        initial_guardian.shard_accepted_at.is_none(),
+        "Shard should not be accepted initially"
+    );
+
+    // Execute the POST request to accept the shard
+    let response = app
+        .oneshot(create_test_request(
+            "POST",
+            &format!("/boxes/guardian/{}/shard/accept", box_id),
+            "guardian_1",
+            None,
+        ))
+        .await
+        .unwrap();
+
+    // Verify response
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json_response = response_to_json(response).await;
+    debug!("Response JSON: {:?}", json_response);
+
+    assert_eq!(
+        json_response.get("message").unwrap().as_str().unwrap(),
+        "Shard accepted successfully"
+    );
+    assert!(json_response.get("shardAcceptedAt").is_some());
+    assert_eq!(
+        json_response.get("boxId").unwrap().as_str().unwrap(),
+        box_id
+    );
+    assert_eq!(
+        json_response.get("boxName").unwrap().as_str().unwrap(),
+        "Guardian Test Box 1"
+    );
+
+    // Add delay for DynamoDB consistency
+    if matches!(store, TestStore::DynamoDB(_)) {
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
+
+    // Verify directly in the store
+    let updated_box = match &store {
+        TestStore::Mock(mock) => mock.get_box(box_id).await.unwrap(),
+        TestStore::DynamoDB(dynamo) => dynamo.get_box(box_id).await.unwrap(),
+    };
+    let updated_guardian = updated_box
+        .guardians
+        .iter()
+        .find(|g| g.id == "guardian_1")
+        .unwrap();
+    assert!(
+        updated_guardian.shard_accepted_at.is_some(),
+        "Shard should be accepted in store"
+    );
+}
+
+#[tokio::test]
+async fn test_accept_guardian_shard_already_accepted() {
+    let (app, store) = create_test_app().await;
+    add_test_data_to_store(&store).await;
+
+    let box_id = "11111111-1111-1111-1111-111111111111";
+
+    // First, set the guardian's shard as already accepted
+    let accepted_guardian = Guardian {
+        id: "guardian_1".into(),
+        name: "Guardian One".into(),
+        lead_guardian: false,
+        status: GuardianStatus::Accepted,
+        added_at: now_str(),
+        invitation_id: "invitation_1".into(),
+        lock_data_received_at: None,
+        encrypted_shard: None,
+        shard_hash: None,
+        shard_fetched_at: None,
+        shard_accepted_at: Some("2024-01-01T00:00:00Z".to_string()),
+    };
+    replace_guardian(&store, box_id, accepted_guardian).await;
+
+    // Execute the POST request to accept the shard again
+    let response = app
+        .oneshot(create_test_request(
+            "POST",
+            &format!("/boxes/guardian/{}/shard/accept", box_id),
+            "guardian_1",
+            None,
+        ))
+        .await
+        .unwrap();
+
+    // Should still return OK but with "already accepted" message
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let json_response = response_to_json(response).await;
+    assert_eq!(
+        json_response.get("message").unwrap().as_str().unwrap(),
+        "Shard already accepted"
+    );
+    assert_eq!(
+        json_response
+            .get("shardAcceptedAt")
+            .unwrap()
+            .as_str()
+            .unwrap(),
+        "2024-01-01T00:00:00Z"
+    );
+}
+
+#[tokio::test]
+async fn test_accept_guardian_shard_not_guardian() {
+    let (app, store) = create_test_app().await;
+    add_test_data_to_store(&store).await;
+
+    let box_id = "11111111-1111-1111-1111-111111111111";
+
+    // Execute the POST request as a non-guardian
+    let response = app
+        .oneshot(create_test_request(
+            "POST",
+            &format!("/boxes/guardian/{}/shard/accept", box_id),
+            "not_a_guardian",
+            None,
+        ))
+        .await
+        .unwrap();
+
+    // Should return UNAUTHORIZED
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_accept_guardian_shard_unlocked_box() {
+    let (app, store) = create_test_app().await;
+
+    // Create an unlocked box with a guardian
+    let now = now_str();
+    let unlocked_box = BoxRecord {
+        id: "unlocked-box-111".into(),
+        name: "Unlocked Test Box".into(),
+        description: "Box that is not locked".into(),
+        is_locked: false,
+        locked_at: None,
+        created_at: now.clone(),
+        updated_at: now.clone(),
+        owner_id: "owner_1".into(),
+        owner_name: Some("Owner One".into()),
+        documents: vec![],
+        guardians: vec![Guardian {
+            id: "guardian_1".into(),
+            name: "Guardian One".into(),
+            lead_guardian: false,
+            status: GuardianStatus::Accepted,
+            added_at: now.clone(),
+            invitation_id: "invitation_unlocked".into(),
+            lock_data_received_at: None,
+            encrypted_shard: None,
+            shard_hash: None,
+            shard_fetched_at: None,
+            shard_accepted_at: None,
+        }],
+        unlock_instructions: None,
+        unlock_request: None,
+        version: 0,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
+    };
+
+    match &store {
+        TestStore::Mock(mock) => {
+            mock.create_box(unlocked_box).await.unwrap();
+        }
+        TestStore::DynamoDB(dynamo) => {
+            dynamo.create_box(unlocked_box).await.unwrap();
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        }
+    }
+
+    // Execute the POST request to accept shard on unlocked box
+    let response = app
+        .oneshot(create_test_request(
+            "POST",
+            "/boxes/guardian/unlocked-box-111/shard/accept",
+            "guardian_1",
+            None,
+        ))
+        .await
+        .unwrap();
+
+    // Should return BAD_REQUEST
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let json_response = response_to_json(response).await;
+    assert!(json_response
+        .get("error")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .contains("locked"));
+}
+
+#[tokio::test]
+async fn test_accept_guardian_shard_box_not_found() {
+    let (app, store) = create_test_app().await;
+    add_test_data_to_store(&store).await;
+
+    let non_existent_box_id = "99999999-9999-9999-9999-999999999999";
+
+    // Execute the POST request with a non-existent box ID
+    let response = app
+        .oneshot(create_test_request(
+            "POST",
+            &format!("/boxes/guardian/{}/shard/accept", non_existent_box_id),
+            "guardian_1",
+            None,
+        ))
+        .await
+        .unwrap();
+
+    // Should return NOT_FOUND
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }

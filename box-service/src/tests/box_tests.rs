@@ -173,6 +173,7 @@ async fn test_lock_and_acknowledge_shards_with_mock_store() {
         encrypted_shard: None,
         shard_hash: None,
         shard_fetched_at: None,
+        shard_accepted_at: None,
     };
     let g2 = Guardian {
         id: "g2".into(),
@@ -185,6 +186,7 @@ async fn test_lock_and_acknowledge_shards_with_mock_store() {
         encrypted_shard: None,
         shard_hash: None,
         shard_fetched_at: None,
+        shard_accepted_at: None,
     };
 
     let box_record = BoxRecord {
@@ -1146,6 +1148,7 @@ async fn test_update_single_guardian() {
         encrypted_shard: None,
         shard_hash: None,
         shard_fetched_at: None,
+        shard_accepted_at: None,
     };
 
     box_record.guardians.push(guardian_record);
@@ -1257,6 +1260,7 @@ async fn test_delete_guardian_success() {
         encrypted_shard: None,
         shard_hash: None,
         shard_fetched_at: None,
+        shard_accepted_at: None,
     };
 
     upsert_guardians(&store, "box_1", vec![guardian.clone()]).await;
@@ -1303,6 +1307,7 @@ async fn test_delete_guardian_unauthorized() {
         encrypted_shard: None,
         shard_hash: None,
         shard_fetched_at: None,
+        shard_accepted_at: None,
     };
 
     upsert_guardians(&store, "box_1", vec![guardian]).await;

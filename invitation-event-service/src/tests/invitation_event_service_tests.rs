@@ -358,6 +358,7 @@ async fn test_invitation_created_idempotency() {
         encrypted_shard: None,
         shard_hash: None,
         shard_fetched_at: None,
+        shard_accepted_at: None,
     };
 
     let box_record = lockbox_shared::models::BoxRecord {
@@ -526,6 +527,7 @@ async fn test_invitation_viewed_handler() {
         encrypted_shard: None,
         shard_hash: None,
         shard_fetched_at: None,
+        shard_accepted_at: None,
     };
 
     box_record.guardians.push(guardian);
@@ -602,6 +604,7 @@ async fn test_no_matching_guardian() {
             encrypted_shard: None,
             shard_hash: None,
             shard_fetched_at: None,
+            shard_accepted_at: None,
         }],
         unlock_instructions: None,
         unlock_request: None,
@@ -691,6 +694,7 @@ async fn test_concurrent_updates() {
         encrypted_shard: None,
         shard_hash: None,
         shard_fetched_at: None,
+        shard_accepted_at: None,
     };
 
     let guardian2 = lockbox_shared::models::Guardian {
@@ -704,6 +708,7 @@ async fn test_concurrent_updates() {
         encrypted_shard: None,
         shard_hash: None,
         shard_fetched_at: None,
+        shard_accepted_at: None,
     };
 
     let guardian3 = lockbox_shared::models::Guardian {
@@ -717,6 +722,7 @@ async fn test_concurrent_updates() {
         encrypted_shard: None,
         shard_hash: None,
         shard_fetched_at: None,
+        shard_accepted_at: None,
     };
 
     box_record.guardians.push(guardian1);
@@ -822,6 +828,7 @@ async fn test_malformed_event() {
             encrypted_shard: None,
             shard_hash: None,
             shard_fetched_at: None,
+            shard_accepted_at: None,
         }],
         unlock_instructions: None,
         unlock_request: None,

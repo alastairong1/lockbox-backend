@@ -61,10 +61,7 @@ pub async fn send_push_notifications(
         })
         .collect();
 
-    info!(
-        "Sending {} push notifications to Expo",
-        messages.len()
-    );
+    info!("Sending {} push notifications to Expo", messages.len());
 
     let client = Client::new();
     let response = client

@@ -252,8 +252,7 @@ impl super::BoxStore for DynamoBoxStore {
     /// - For production systems with many boxes, consider adding a GSI on isLocked
     async fn scan_locked_boxes(&self) -> Result<Vec<BoxRecord>> {
         let expr_attr_names = HashMap::from([("#is_locked".to_string(), "isLocked".to_string())]);
-        let expr_attr_values =
-            HashMap::from([(":locked".to_string(), AttributeValue::Bool(true))]);
+        let expr_attr_values = HashMap::from([(":locked".to_string(), AttributeValue::Bool(true))]);
 
         let response = self
             .client

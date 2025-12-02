@@ -87,7 +87,10 @@ async fn handler(
                 }
             }
             Err(e) => {
-                error!("Failed to parse SNS message: {}, error: {}", message.message, e);
+                error!(
+                    "Failed to parse SNS message: {}, error: {}",
+                    message.message, e
+                );
                 // Continue processing remaining records
                 continue;
             }

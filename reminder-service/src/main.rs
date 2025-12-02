@@ -59,10 +59,7 @@ async fn handler(
 
     for box_rec in &boxes {
         if let Err(e) = process_box(box_rec, &push_store, now).await {
-            error!(
-                "Failed to process box {}: {:?}",
-                box_rec.id, e
-            );
+            error!("Failed to process box {}: {:?}", box_rec.id, e);
             // Continue processing other boxes
         } else {
             reminders_sent += 1;
@@ -71,8 +68,7 @@ async fn handler(
 
     info!(
         "Reminder service completed. Processed {} boxes, sent reminders for {} guardians",
-        box_count,
-        reminders_sent
+        box_count, reminders_sent
     );
 
     Ok(())
@@ -92,7 +88,10 @@ async fn process_box(
     let locked_at = match locked_at {
         Some(dt) => dt,
         None => {
-            warn!("Box {} is locked but has no locked_at timestamp", box_rec.id);
+            warn!(
+                "Box {} is locked but has no locked_at timestamp",
+                box_rec.id
+            );
             return Ok(());
         }
     };
@@ -152,10 +151,7 @@ async fn process_box(
         )
         .await
         {
-            error!(
-                "Failed to send reminder to guardian {}: {}",
-                guardian.id, e
-            );
+            error!("Failed to send reminder to guardian {}: {}", guardian.id, e);
         } else {
             info!(
                 "Successfully sent reminder {} to guardian {}",

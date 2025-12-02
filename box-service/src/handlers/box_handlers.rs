@@ -201,10 +201,7 @@ where
 
     let _ = store.update_box(box_rec).await?;
 
-    info!(
-        "Guardian {} accepted shard for box_id={}",
-        user_id, box_id
-    );
+    info!("Guardian {} accepted shard for box_id={}", user_id, box_id);
 
     Ok(Json(serde_json::json!({
         "message": "Shard accepted successfully",
@@ -856,9 +853,7 @@ pub async fn publish_box_locked_event(
         .set_message_attributes(Some(message_attributes))
         .send()
         .await
-        .map_err(|e| {
-            AppError::internal_server_error(format!("Failed to publish to SNS: {}", e))
-        })?;
+        .map_err(|e| AppError::internal_server_error(format!("Failed to publish to SNS: {}", e)))?;
 
     info!(
         "Successfully published box_locked event for box_id={}",

@@ -149,3 +149,100 @@ async fn test_mock_invitation_store() {
     let get_deleted = store.get_invitation(&invitation_id).await;
     assert!(get_deleted.is_err());
 }
+
+#[tokio::test]
+async fn test_mock_box_store_scan_locked_boxes() {
+    // Create a mock store
+    let store = Arc::new(MockBoxStore::new());
+
+    let now = crate::models::now_str();
+
+    // Create a locked box
+    let locked_box1 = BoxRecord {
+        id: Uuid::new_v4().to_string(),
+        name: "Locked Box 1".to_string(),
+        description: "A locked box".to_string(),
+        is_locked: true,
+        locked_at: Some(now.clone()),
+        created_at: now.clone(),
+        updated_at: now.clone(),
+        owner_id: "owner_1".to_string(),
+        owner_name: Some("Owner 1".to_string()),
+        documents: vec![],
+        guardians: vec![],
+        unlock_instructions: None,
+        unlock_request: None,
+        version: 0,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
+    };
+
+    // Create another locked box
+    let locked_box2 = BoxRecord {
+        id: Uuid::new_v4().to_string(),
+        name: "Locked Box 2".to_string(),
+        description: "Another locked box".to_string(),
+        is_locked: true,
+        locked_at: Some(now.clone()),
+        created_at: now.clone(),
+        updated_at: now.clone(),
+        owner_id: "owner_2".to_string(),
+        owner_name: Some("Owner 2".to_string()),
+        documents: vec![],
+        guardians: vec![],
+        unlock_instructions: None,
+        unlock_request: None,
+        version: 0,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
+    };
+
+    // Create an unlocked box
+    let unlocked_box = BoxRecord {
+        id: Uuid::new_v4().to_string(),
+        name: "Unlocked Box".to_string(),
+        description: "An unlocked box".to_string(),
+        is_locked: false,
+        locked_at: None,
+        created_at: now.clone(),
+        updated_at: now.clone(),
+        owner_id: "owner_1".to_string(),
+        owner_name: Some("Owner 1".to_string()),
+        documents: vec![],
+        guardians: vec![],
+        unlock_instructions: None,
+        unlock_request: None,
+        version: 0,
+        shard_threshold: None,
+        shards_fetched: None,
+        total_shards: None,
+        shards_deleted_at: None,
+    };
+
+    // Store all boxes
+    store.create_box(locked_box1.clone()).await.unwrap();
+    store.create_box(locked_box2.clone()).await.unwrap();
+    store.create_box(unlocked_box.clone()).await.unwrap();
+
+    // Scan for locked boxes
+    let result = store.scan_locked_boxes().await;
+    assert!(result.is_ok());
+
+    let locked_boxes = result.unwrap();
+    assert_eq!(locked_boxes.len(), 2);
+
+    // Verify all returned boxes are locked
+    for box_rec in &locked_boxes {
+        assert!(box_rec.is_locked, "All scanned boxes should be locked");
+    }
+
+    // Verify we got the right boxes
+    let locked_ids: Vec<&str> = locked_boxes.iter().map(|b| b.id.as_str()).collect();
+    assert!(locked_ids.contains(&locked_box1.id.as_str()));
+    assert!(locked_ids.contains(&locked_box2.id.as_str()));
+    assert!(!locked_ids.contains(&unlocked_box.id.as_str()));
+}

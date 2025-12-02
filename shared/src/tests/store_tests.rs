@@ -390,6 +390,7 @@ mod dynamo_tests {
             encrypted_shard: None,
             shard_hash: None,
             shard_fetched_at: None,
+            shard_accepted_at: None,
         });
 
         // Box 2 - has test_guardian as a rejected guardian (shouldn't show up)
@@ -405,6 +406,7 @@ mod dynamo_tests {
             encrypted_shard: None,
             shard_hash: None,
             shard_fetched_at: None,
+            shard_accepted_at: None,
         });
 
         // Box 3 - different guardian
@@ -420,6 +422,7 @@ mod dynamo_tests {
             encrypted_shard: None,
             shard_hash: None,
             shard_fetched_at: None,
+            shard_accepted_at: None,
         });
 
         store.create_box(test_box1.clone()).await.unwrap();
@@ -434,6 +437,64 @@ mod dynamo_tests {
         // Should only get Box 1 (with accepted guardian status)
         assert_eq!(fetched_boxes.len(), 1);
         assert_eq!(fetched_boxes[0].id, test_box1.id);
+
+        // Clean up
+        delete_test_table(&client, &table_name)
+            .await
+            .expect("Failed to delete test table");
+    }
+
+    // Test for scanning locked boxes
+    #[tokio::test]
+    async fn dynamo_store_scan_locked_boxes() {
+        init_test_logging();
+        // Check if DynamoDB local is running
+        if !is_dynamodb_local_running() {
+            info!("Skipping test dynamo_store_scan_locked_boxes: DynamoDB Local is not running");
+            return;
+        }
+
+        // Create the test store
+        let (store, client, table_name) = create_test_store().await;
+
+        // Create test boxes - mix of locked and unlocked
+        let mut locked_box1 = create_test_box("Locked Box 1", "owner_1");
+        locked_box1.is_locked = true;
+        locked_box1.locked_at = Some(crate::models::now_str());
+
+        let mut locked_box2 = create_test_box("Locked Box 2", "owner_2");
+        locked_box2.is_locked = true;
+        locked_box2.locked_at = Some(crate::models::now_str());
+
+        let unlocked_box1 = create_test_box("Unlocked Box 1", "owner_1");
+        // is_locked defaults to false in create_test_box
+
+        let unlocked_box2 = create_test_box("Unlocked Box 2", "owner_3");
+
+        store.create_box(locked_box1.clone()).await.unwrap();
+        store.create_box(locked_box2.clone()).await.unwrap();
+        store.create_box(unlocked_box1.clone()).await.unwrap();
+        store.create_box(unlocked_box2.clone()).await.unwrap();
+
+        // Test scan_locked_boxes
+        let result = store.scan_locked_boxes().await;
+        assert!(result.is_ok());
+
+        let locked_boxes = result.unwrap();
+        // Should only get the two locked boxes
+        assert_eq!(locked_boxes.len(), 2);
+
+        // Verify all returned boxes are locked
+        for box_rec in &locked_boxes {
+            assert!(box_rec.is_locked, "All returned boxes should be locked");
+        }
+
+        // Verify we got the correct boxes
+        let locked_ids: Vec<&str> = locked_boxes.iter().map(|b| b.id.as_str()).collect();
+        assert!(locked_ids.contains(&locked_box1.id.as_str()));
+        assert!(locked_ids.contains(&locked_box2.id.as_str()));
+        assert!(!locked_ids.contains(&unlocked_box1.id.as_str()));
+        assert!(!locked_ids.contains(&unlocked_box2.id.as_str()));
 
         // Clean up
         delete_test_table(&client, &table_name)
